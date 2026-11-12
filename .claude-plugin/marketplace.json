@@ -1,0 +1,16 @@
+{
+  "name": "tin-collar",
+  "owner": {
+    "name": "Dzmitry Bykau"
+  },
+  "metadata": {
+    "description": "Tin Collar: a pixel-art robot office for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "tin-collar",
+      "source": "./",
+      "description": "A pixel-art office beside the chat where every agent is a 3D-printed robot doing its real work"
+    }
+  ]
+}

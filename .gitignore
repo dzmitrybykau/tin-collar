@@ -1,0 +1,11 @@
+# the API types Claude Code writes here for the editor
+.claude-plugin/types/
+
+# local tooling
+node_modules/
+.claude/
+
+# the operating system and editors
+.DS_Store
+Thumbs.db
+*.log

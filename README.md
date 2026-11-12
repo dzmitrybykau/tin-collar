@@ -1,0 +1,139 @@
+<h1 align="center">Tin Collar</h1>
+
+<p align="center">
+  A pixel-art office for <a href="https://claude.com/claude-code">Claude Code</a>, staffed by robots.<br>
+  Every agent in your session is a robot at a desk, doing its real work.
+</p>
+
+<p align="center">
+  <img src="docs/tin-collar.gif" width="768" alt="A pixel office: a robot is 3D-printed, collects a blueprint from the main agent and walks to its desk; another hands in its report and drops through a hatch into a vat of molten metal">
+</p>
+
+<p align="center"><sub>
+  A designer is printed and briefed. The writer hands in its report and takes the hatch.<br>
+  The metal goes back up the pipe and comes out of the printer as an architect.
+</sub></p>
+
+## What it does
+
+Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conversation and draws the session as a small building:
+
+- **The main agent** sits at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for.
+- **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor.
+- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a vat of molten metal. A pipe takes the metal back to the printer, where it becomes the next robot.
+- **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
+- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens.
+- **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. When the main agent has nothing to do, it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
+
+<p align="center">
+  <img src="docs/office-night.png" width="768" alt="A three-storey pixel office at night with thirteen robots at their desks">
+</p>
+
+## Dressed for the job
+
+Each robot is painted and dressed for its role. The role comes from the task the subagent was given ("review the auth module", "design the icons"), and from its agent type when the task does not say.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/roles/main.png" width="64" alt=""><br><b>Main agent</b><br><sub>antenna</sub></td>
+    <td align="center"><img src="docs/roles/coder.png" width="64" alt=""><br><b>Coder</b><br><sub>headphones</sub></td>
+    <td align="center"><img src="docs/roles/designer.png" width="64" alt=""><br><b>Designer</b><br><sub>beret</sub></td>
+    <td align="center"><img src="docs/roles/architect.png" width="64" alt=""><br><b>Architect</b><br><sub>hard hat</sub></td>
+    <td align="center"><img src="docs/roles/tester.png" width="64" alt=""><br><b>Tester</b><br><sub>goggles</sub></td>
+    <td align="center"><img src="docs/roles/reviewer.png" width="64" alt=""><br><b>Reviewer</b><br><sub>mortarboard</sub></td>
+    <td align="center"><img src="docs/roles/explorer.png" width="64" alt=""><br><b>Explorer</b><br><sub>safari hat</sub></td>
+    <td align="center"><img src="docs/roles/writer.png" width="64" alt=""><br><b>Writer</b><br><sub>beanie</sub></td>
+    <td align="center"><img src="docs/roles/helper.png" width="64" alt=""><br><b>Helper</b><br><sub>cap</sub></td>
+  </tr>
+</table>
+
+## On the wall
+
+- **The sign** carries the name of the folder the session works in.
+- **Employee of the Day** is a gilt frame with the portrait of the robot that has used the most tokens today, and its share of the day's total.
+- **The whiteboard** charts tokens per day for the last seven days, across all your chats.
+
+## Under the picture
+
+Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one.
+
+Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
+
+In a terminal there are no pictures; you get the task list and the traces.
+
+## Install
+
+At the prompt of a Claude Code terminal session:
+
+```
+/plugin install tin-collar --marketplace dzmitrybykau/tin-collar
+```
+
+Answer `y` to add the marketplace, then choose a scope. The user scope turns the office on for every session.
+
+From a shell:
+
+```bash
+claude plugin install tin-collar --marketplace dzmitrybykau/tin-collar
+```
+
+In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `dzmitrybykau/tin-collar`, then **Add plugin**. A mod installed from a terminal at the user scope also loads in the desktop app's local sessions.
+
+Built and tested on Claude Code 2.1.321.
+
+## Use
+
+The Office pane opens beside the chat by itself. If you close it, `/office` brings it back.
+
+There is nothing to configure. Start a few subagents and watch the printer.
+
+## Update or remove
+
+```bash
+claude plugin marketplace update tin-collar
+```
+
+```bash
+claude plugin update tin-collar@tin-collar
+```
+
+```bash
+claude plugin uninstall tin-collar@tin-collar
+```
+
+## Privacy
+
+Tin Collar makes no network requests, reads no files and starts no processes. It draws from what Claude Code already gives a mod about the session: tool calls, subagents starting and stopping, token usage, and an agent's latest message for its trace. It keeps one thing between sessions: the number of tokens used per day, in Claude Code's own plugin store on your computer.
+
+## Development
+
+```bash
+git clone https://github.com/dzmitrybykau/tin-collar
+```
+
+```bash
+claude --plugin-dir tin-collar
+```
+
+```bash
+claude plugin validate tin-collar
+```
+
+```bash
+claude plugin test tin-collar
+```
+
+| File | What it holds |
+| --- | --- |
+| `hooks/register.tsx` | The hooks: turns session events into the state of the office, draws the pane and the task cards |
+| `hooks/scene.ts` | The pixel renderer: sprites, the building, and every robot's timeline |
+| `hooks/tally.ts` | Token counts per robot and per day |
+| `hooks/hit.tsx` | The click layer over the picture |
+| `types/index.d.ts` | The type contract for the mod's state |
+| `tests/office.test.tsx` | Tests for the behaviour described above |
+
+The picture is drawn into a small pixel framebuffer, converted to SVG paths and animated with SMIL. One picture holds everything that is about to happen (a robot being printed, walking, riding the lift, dropping into the vat), so it is replaced only when the session's state changes. That is why it does not flicker.
+
+## License
+
+[MIT](LICENSE)

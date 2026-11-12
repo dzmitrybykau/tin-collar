@@ -18,7 +18,7 @@
 
 Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conversation and draws the session as a small building:
 
-- **The main agent** sits at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for.
+- **The main agent** runs the office from a leather chair at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for. With nothing to type, it taps its stick on the desk.
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
 - **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a vat of molten metal. A pipe takes the metal back to the printer, where it becomes the next robot.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
@@ -31,19 +31,21 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 
 ## Dressed for the job
 
-Each robot is painted and dressed for its role. The role comes from the task the subagent was given ("review the auth module", "design the icons"), and from its agent type when the task does not say.
+Each robot is painted and dressed for its role, keeps a thing of its own on its monitor, and carries another whenever it has a hand free. The role comes from the task the subagent was given ("review the auth module", "design the icons"), and from its agent type when the task does not say.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/roles/main.png" width="64" alt=""><br><b>Main agent</b><br><sub>antenna</sub></td>
-    <td align="center"><img src="docs/roles/coder.png" width="64" alt=""><br><b>Coder</b><br><sub>headphones</sub></td>
-    <td align="center"><img src="docs/roles/designer.png" width="64" alt=""><br><b>Designer</b><br><sub>beret</sub></td>
-    <td align="center"><img src="docs/roles/architect.png" width="64" alt=""><br><b>Architect</b><br><sub>hard hat</sub></td>
-    <td align="center"><img src="docs/roles/tester.png" width="64" alt=""><br><b>Tester</b><br><sub>goggles</sub></td>
-    <td align="center"><img src="docs/roles/reviewer.png" width="64" alt=""><br><b>Reviewer</b><br><sub>mortarboard</sub></td>
-    <td align="center"><img src="docs/roles/explorer.png" width="64" alt=""><br><b>Explorer</b><br><sub>safari hat</sub></td>
-    <td align="center"><img src="docs/roles/writer.png" width="64" alt=""><br><b>Writer</b><br><sub>beanie</sub></td>
-    <td align="center"><img src="docs/roles/helper.png" width="64" alt=""><br><b>Helper</b><br><sub>cap</sub></td>
+    <td align="center"><img src="docs/roles/main.png" width="64" alt=""><br><b>Main agent</b><br><sub>antenna, tie<br>a stick and a boss's chair</sub></td>
+    <td align="center"><img src="docs/roles/coder.png" width="64" alt=""><br><b>Coder</b><br><sub>headset, hoodie<br>a smoothie, on a monowheel</sub></td>
+    <td align="center"><img src="docs/roles/designer.png" width="64" alt=""><br><b>Designer</b><br><sub>beret, striped shirt<br>palette and brush</sub></td>
+    <td align="center"><img src="docs/roles/architect.png" width="64" alt=""><br><b>Architect</b><br><sub>hard hat, hi-vis vest<br>a folding rule, on tracks</sub></td>
+    <td align="center"><img src="docs/roles/tester.png" width="64" alt=""><br><b>Tester</b><br><sub>goggles, lab coat<br>a fly swatter for the bugs</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/roles/reviewer.png" width="64" alt=""><br><b>Reviewer</b><br><sub>mortarboard, gown<br>a magnifying glass</sub></td>
+    <td align="center"><img src="docs/roles/explorer.png" width="64" alt=""><br><b>Explorer</b><br><sub>fedora, backpack<br>a burning torch</sub></td>
+    <td align="center"><img src="docs/roles/writer.png" width="64" alt=""><br><b>Writer</b><br><sub>quill, scarf<br>its nose in a book</sub></td>
+    <td align="center"><img src="docs/roles/helper.png" width="64" alt=""><br><b>Helper</b><br><sub>cap, tool belt<br>a wrench</sub></td>
   </tr>
 </table>
 
@@ -126,7 +128,7 @@ claude plugin test tin-collar
 | File | What it holds |
 | --- | --- |
 | `hooks/register.tsx` | The hooks: turns session events into the state of the office, draws the pane and the task cards |
-| `hooks/scene.ts` | The pixel renderer: sprites, the building, and every robot's timeline |
+| `hooks/scene.ts` | The pixel renderer: the robots and what they wear, the building, and every robot's timeline |
 | `hooks/tally.ts` | Token counts per robot and per day |
 | `hooks/hit.tsx` | The click layer over the picture |
 | `types/index.d.ts` | The type contract for the mod's state |

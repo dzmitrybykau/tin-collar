@@ -1,11 +1,21 @@
 {
   "name": "tin-collar",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "A pixel-art office beside the chat where every agent is a 3D-printed robot doing its real work",
-  "author": { "name": "Dzmitry Bykau", "url": "https://github.com/dzmitrybykau" },
+  "author": {
+    "name": "Dzmitry Bykau",
+    "url": "https://github.com/dzmitrybykau"
+  },
   "homepage": "https://github.com/dzmitrybykau/tin-collar",
   "repository": "https://github.com/dzmitrybykau/tin-collar",
   "license": "MIT",
-  "keywords": ["claude-code", "mod", "pixel-art", "agents", "subagents", "visualization"],
+  "keywords": [
+    "claude-code",
+    "mod",
+    "pixel-art",
+    "agents",
+    "subagents",
+    "visualization"
+  ],
   "types": "./types/index.d.ts"
 }

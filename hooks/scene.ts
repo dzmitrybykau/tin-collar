@@ -47,17 +47,17 @@ export const C = {
 }
 
 export type Paint = { l: string; m: string; d: string }
-type Headgear = 'antenna' | 'beret' | 'hardhat' | 'goggles' | 'mortar' | 'safari' | 'beanie' | 'phones' | 'cap'
+type Headgear = 'antenna' | 'beret' | 'hardhat' | 'goggles' | 'mortar' | 'fedora' | 'quill' | 'phones' | 'cap'
 
-/* Each role has its own paint and headgear, so you can tell who is who across the room. */
+/* Each role has its own paint, headgear and clothes, so you can tell who is who across the room. */
 export type Role = { id: string; title: string; headgear: Headgear; paint: Paint; words?: RegExp }
 const ROLES: Role[] = [
   { id: 'designer', title: 'Designer', headgear: 'beret', paint: { l: '#ffb8d4', m: '#e86aa6', d: '#a8436f' }, words: /\b(design(er|ing)?|ui|ux|artist|visual|palette|colou?rs?|style|css|icons?)\b/i },
   { id: 'architect', title: 'Architect', headgear: 'hardhat', paint: { l: '#a9ccff', m: C.blue, d: C.blueD }, words: /\b(architect(ure)?|plan(ner|ning)?|structure|blueprint|system design)\b/i },
   { id: 'tester', title: 'Tester', headgear: 'goggles', paint: { l: '#dcf59a', m: '#a8cc3c', d: '#6f8f22' }, words: /\b(test(er|s|ing)?|qa|verif(y|ier|ication))\b/i },
   { id: 'reviewer', title: 'Reviewer', headgear: 'mortar', paint: { l: C.violetL, m: C.violet, d: C.violetD }, words: /\b(review(er|ing)?|audit(or)?|critic|inspect(or)?)\b/i },
-  { id: 'explorer', title: 'Explorer', headgear: 'safari', paint: { l: C.tealL, m: C.teal, d: C.tealD }, words: /\b(explor(e|er|ing)|research(er|ing)?|search(ing)?|find|investigat\w*|scout|survey)\b/i },
-  { id: 'writer', title: 'Writer', headgear: 'beanie', paint: { l: '#f3dcb5', m: '#d2a86e', d: '#9c7444' }, words: /\b(writ(e|er|ing)|docs?|documentation|copy|author|readme)\b/i },
+  { id: 'explorer', title: 'Explorer', headgear: 'fedora', paint: { l: C.tealL, m: C.teal, d: C.tealD }, words: /\b(explor(e|er|ing)|research(er|ing)?|search(ing)?|find|investigat\w*|scout|survey)\b/i },
+  { id: 'writer', title: 'Writer', headgear: 'quill', paint: { l: '#f3dcb5', m: '#d2a86e', d: '#9c7444' }, words: /\b(writ(e|er|ing)|docs?|documentation|copy|author|readme)\b/i },
   { id: 'coder', title: 'Coder', headgear: 'phones', paint: { l: '#b5f0bb', m: C.green, d: C.greenD }, words: /\b(cod(e|er|ing)|develop(er)?|engineer|implement\w*|program\w*|refactor\w*|fix|build(er)?)\b/i },
 ]
 const MAIN_ROLE: Role = { id: 'main', title: 'Main agent', headgear: 'antenna', paint: { l: C.coralL, m: C.coral, d: C.coralD } }
@@ -234,6 +234,8 @@ export const fit = (s: string, max: number) => {
 type Eyes = 'open' | 'up' | 'happy' | 'x' | 'off'
 type Pose = 'stand' | 'walk' | 'type' | 'sit' | 'raise' | 'carry' | 'read' | 'lever' | 'cheer' | 'err' | 'sleep'
 type BotOpts = {
+  /** The role it plays: its paint, what is on its head and what it wears. The main agent's when left out. */
+  role?: string
   paint?: Paint
   small?: boolean
   face?: number
@@ -250,109 +252,239 @@ type BotOpts = {
   girth?: number
   bulb?: string
   chest?: string
+  /** With a hand free, it holds what its role is known for: a smoothie, a fly swatter, the boss's stick. */
+  tool?: boolean
 }
 
-/** Hats and kit on top of the head; drawn after the head, before the visor. */
-function headgear(g: Px, gear: Headgear, x: number, hy: number, hw: number, side: boolean, f: number, bulb: string) {
+/**
+ * What a robot wears on its head, drawn after the head and before the visor. A robot is some twenty
+ * pixels tall on the screen, so each of these is big enough to name the job from across the room.
+ */
+function headgear(g: Px, gear: Headgear, x: number, hy: number, hw: number, hh: number, side: boolean, f: number, bulb: string) {
   const I = C.ink
   const hl = x - (hw >> 1)
   const half = hw >> 1
-  const X = (dx: number, w: number) => (f > 0 || !side ? x + dx : x - dx - w)
+  // dx runs from the back of the head to the face in a side view and from left to right in a front
+  // view; dy counts down from the head's top row
+  const P = (c: string, dx: number, dy: number, w: number, h: number) => R(g, c, side && f < 0 ? hl + hw - dx - w : hl + dx, hy + dy, w, h)
   switch (gear) {
     case 'beret': {
-      // a painter's beret slumped toward the back, with a little stalk
-      R(g, I, X(-half - 2, hw + 3), hy - 4, hw + 3, 4)
-      R(g, I, X(-half - 3, 2), hy - 2, 2, 3)
-      R(g, '#c43c5c', X(-half - 1, hw + 1), hy - 3, hw + 1, 2)
-      R(g, '#c43c5c', X(-half - 2, 1), hy - 1, 1, 1)
-      R(g, '#f07c96', X(-half + 1, hw - 4), hy - 3, hw - 4, 1)
-      R(g, I, X(0, 1), hy - 6, 1, 2)
+      // a painter's beret, slumped to one side, with its little stalk
+      const back = side ? -3 : -2
+      P(I, back + 2, -6, hw - 2, 1)
+      P(I, back, -5, hw + 3, 5)
+      P(I, back - 1, -3, 3, 5)
+      P(BERET, back + 1, -5, hw + 1, 4)
+      P(BERET, back, -3, 2, 4)
+      P(BERET_L, back + 2, -5, hw - 3, 1)
+      P(I, half - 1, -7, 1, 1)
       return
     }
     case 'hardhat': {
-      // a builder's hard hat with a brim and a ridge
-      R(g, I, hl - 1, hy - 5, hw + 2, 5)
-      R(g, I, hl - 3, hy - 1, hw + 6, 2)
-      R(g, C.yellow, hl, hy - 4, hw, 3)
-      R(g, C.yellow, hl - 2, hy - 1, hw + 4, 1)
-      R(g, '#fff3a8', hl + 1, hy - 4, hw - 5, 1)
-      R(g, '#c9a227', x - 1, hy - 4, 2, 3)
+      // a builder's yellow hard hat: a dome, a ridge and a brim
+      P(I, 1, -7, hw - 2, 1)
+      P(I, 0, -6, hw, 5)
+      P(C.yellow, 1, -6, hw - 2, 4)
+      P('#fff3a8', 2, -6, hw - 5, 1)
+      P('#c9a227', 1, -3, hw - 2, 1)
+      if (!side) P('#c9a227', half - 1, -6, 2, 3)
+      P(I, side ? -1 : -2, -2, hw + 4, 2)
+      P(C.yellow, side ? 0 : -1, -2, hw + 2, 1)
       return
     }
     case 'goggles': {
-      // lab goggles pushed up on the forehead, strap round the head
-      R(g, I, hl, hy, hw, 1)
+      // lab goggles pushed up on the forehead, their strap round the head
       if (side) {
-        R(g, I, X(half - 6, 7), hy - 3, 7, 4)
-        R(g, C.tealL, X(half - 5, 5), hy - 2, 5, 2)
-        R(g, C.white, X(half - 4, 1), hy - 2, 1, 1)
+        P(I, 0, -2, hw, 3)
+        P('#4a5170', 0, -1, hw - 6, 1)
+        P(I, hw - 7, -4, 8, 5)
+        P(C.tealL, hw - 6, -3, 6, 1)
+        P(C.teal, hw - 6, -2, 6, 2)
+        P(C.white, hw - 5, -3, 2, 1)
       } else {
-        R(g, I, x - 6, hy - 3, 6, 4)
-        R(g, I, x, hy - 3, 6, 4)
-        R(g, C.tealL, x - 5, hy - 2, 4, 2)
-        R(g, C.tealL, x + 1, hy - 2, 4, 2)
+        P('#3b4262', 0, 0, hw, 1)
+        P(I, 0, -5, hw, 6)
+        for (const lx of [1, half + 1]) {
+          P(C.tealL, lx, -4, half - 2, 2)
+          P(C.teal, lx, -2, half - 2, 2)
+          P(C.white, lx + 1, -4, 1, 1)
+        }
       }
       return
     }
     case 'mortar': {
-      // a reviewer's square academic cap with a tassel
-      R(g, I, hl - 2, hy - 3, hw + 4, 1)
-      R(g, '#2b2f45', hl + 1, hy - 2, hw - 2, 2)
-      R(g, I, hl + 1, hy - 2, hw - 2, 1)
-      R(g, C.amber, X(half - 2, 1), hy - 3, 1, 4)
+      // a square academic cap: a wide board on a skullcap, the tassel hanging off its edge
+      P(I, side ? 0 : 1, -3, side ? hw : hw - 2, 2)
+      P('#2b2f45', side ? 1 : 2, -3, side ? hw - 2 : hw - 4, 2)
+      P(I, -3, -6, hw + 6, 3)
+      P('#8d96bd', -2, -6, hw + 4, 1)
+      P('#4a5170', -2, -5, hw + 4, 1)
+      P(C.amber, half - 1, -7, 2, 1)
+      P(C.amber, hw + 1, -4, 1, 4)
+      P(C.amber, hw + 1, 0, 2, 3)
       return
     }
-    case 'safari': {
-      // an explorer's pith helmet with a wide brim
-      R(g, I, hl - 3, hy - 1, hw + 6, 2)
-      R(g, '#d9c58a', hl - 2, hy - 1, hw + 4, 1)
-      R(g, I, hl, hy - 5, hw, 4)
-      R(g, '#e6d49a', hl + 1, hy - 4, hw - 2, 3)
-      R(g, C.woodD, hl + 1, hy - 2, hw - 2, 1)
+    case 'fedora': {
+      // an adventurer's fedora: a pinched crown, a dark band and a wide brim
+      P(I, 1, -7, hw - 2, 1)
+      P(I, 0, -6, hw, 4)
+      P(FEDORA, 1, -6, hw - 2, 2)
+      P(FEDORA_L, 1, -6, hw - 4, 1)
+      P(I, half - 1, -6, 2, 1)
+      P('#4a2e1f', 1, -4, hw - 2, 1)
+      P(I, -3, -3, hw + 6, 3)
+      P(FEDORA, -2, -2, hw + 4, 1)
       return
     }
-    case 'beanie': {
-      // a writer's striped beanie with a bobble
-      R(g, I, hl - 1, hy - 4, hw + 2, 5)
-      R(g, '#5b8def', hl, hy - 3, hw, 2)
-      R(g, C.cream, hl, hy - 1, hw, 1)
-      R(g, I, x - 2, hy - 7, 4, 3)
-      R(g, C.paper, x - 1, hy - 6, 2, 1)
+    case 'quill': {
+      // a feather quill tucked behind the ear; seen from the front it leans out past the side of the head
+      const vane: Array<[dy: number, dx: number, w: number]> = [[-1, 1, 2], [-2, 0, 3], [-3, -1, 4], [-4, -2, 4], [-5, -3, 4], [-6, -3, 2]]
+      const Q = (c: string, dx: number, dy: number, w: number) => P(c, side ? dx : hw - dx - w, dy, w, 1)
+      for (const [dy, dx, w] of vane) Q(I, dx - 1, dy, w + 2)
+      Q(I, -3, -7, 2)
+      for (const [dy, dx, w] of vane) {
+        Q(C.white, dx, dy, w)
+        if (w > 2 && dy % 2) Q(C.steelL, dx, dy, 1)
+      }
+      P('#c9a227', side ? 2 : hw - 3, 0, 1, 2)
       return
     }
     case 'phones': {
-      // a coder's headphones: band over the top, a cup over the ear
-      R(g, I, hl, hy - 3, hw, 2)
-      R(g, C.steelL, hl + 1, hy - 3, hw - 2, 1)
+      // a headset: a band over the head, a big cup on the ear and a microphone on its boom
       if (side) {
-        R(g, I, X(-half - 1, 5), hy + 1, 5, 6)
-        R(g, C.coral, X(-half, 3), hy + 2, 3, 4)
+        P(I, 0, -4, 5, 4)
+        P('#4a5170', 1, -3, 3, 3)
+        P(C.steelL, 1, -3, 3, 1)
+        P(I, -2, 0, 5, 7)
+        P(C.steelL, -1, 1, 3, 5)
+        P(C.glow, 0, 2, 1, 3)
+        P(I, 3, hh - 2, hw - 3, 1)
+        P(I, hw, hh - 3, 2, 3)
+        P(C.steelL, hw, hh - 2, 1, 1)
       } else {
-        R(g, I, hl - 3, hy + 1, 4, 6)
-        R(g, I, hl + hw - 1, hy + 1, 4, 6)
-        R(g, C.coral, hl - 2, hy + 2, 2, 4)
-        R(g, C.coral, hl + hw, hy + 2, 2, 4)
+        P(I, 1, -4, hw - 2, 1)
+        P(I, 0, -3, hw, 2)
+        P('#4a5170', 1, -3, hw - 2, 2)
+        P(C.steelL, 1, -3, hw - 2, 1)
+        for (const cx of [-3, hw - 1]) {
+          P(I, cx, 0, 4, 7)
+          P(C.steelL, cx + 1, 1, 2, 5)
+          P(C.glow, cx + (cx < 0 ? 1 : 2), 2, 1, 3)
+        }
+        P(I, hw - 5, hh - 1, 5, 1)
+        P(I, hw - 6, hh - 2, 2, 2)
+        P(C.steelL, hw - 6, hh - 2, 1, 1)
       }
       return
     }
     case 'cap': {
-      // a helper's cap with its peak to the front
-      R(g, I, hl, hy - 4, hw, 4)
-      R(g, '#4a5170', hl + 1, hy - 3, hw - 2, 2)
+      // a workman's red cap with a white front and a long peak
+      P(I, 1, -6, hw - 2, 1)
+      P(I, 0, -5, hw, 4)
+      P(C.red, 1, -5, hw - 2, 4)
+      P('#ff8a80', 1, -5, hw - 4, 1)
       if (side) {
-        R(g, I, X(half - 1, 6), hy - 2, 6, 2)
-        R(g, '#3b4262', X(half, 4), hy - 2, 4, 1)
-      } else R(g, I, hl + 1, hy - 1, hw - 2, 1)
+        P(C.white, hw - 4, -4, 3, 2)
+        P(I, hw - 1, -3, 6, 3)
+        P(C.redD, hw, -2, 4, 1)
+      } else {
+        P(C.white, half - 2, -5, 4, 2)
+        P(I, 0, -3, hw, 1)
+        P(C.redD, 1, -2, hw - 2, 1)
+      }
       return
     }
     default: {
-      const ax = side ? X(-2, 1) : x
-      R(g, I, ax, hy - 3, 1, 2)
-      R(g, I, ax - 1, hy - 6, 4, 3)
-      R(g, bulb, ax, hy - 5, 2, 2)
+      // the main agent's antenna and its lamp
+      const ax = side ? half - 2 : half
+      P(I, ax, -3, 1, 2)
+      P(I, ax - 1, -6, 4, 3)
+      P(bulb, ax, -5, 2, 2)
     }
   }
 }
+const BERET = '#c43c5c'
+const BERET_L = '#f07c96'
+const FEDORA = '#a8713f'
+const FEDORA_L = '#d19a5f'
+
+/** What a role wears. It is drawn over the body and under the arms. */
+function outfit(g: Px, id: string, bl: number, by: number, bw: number, bh: number, side: boolean, f: number, p: Paint) {
+  const I = C.ink
+  const mid = bw >> 1
+  // dx runs from the back to the chest in a side view and from left to right in a front view
+  const P = (c: string, dx: number, dy: number, w: number, h: number) => R(g, c, side && f < 0 ? bl + bw - dx - w : bl + dx, by + dy, w, h)
+  switch (id) {
+    case 'main': // a collar and tie
+      if (side) {
+        P(C.white, bw - 2, 0, 2, 1)
+        P(TIE, bw - 1, 1, 1, bh - 2)
+      } else {
+        P(C.white, mid - 2, 0, 4, 1)
+        P(TIE, mid - 1, 1, 2, bh - 2)
+      }
+      return
+    case 'coder': // a dark hoodie with its drawstrings
+      P('#3b4262', 0, 0, bw, bh)
+      P('#4a5170', 0, 0, bw, 1)
+      if (side) P(C.steelL, bw - 1, 1, 1, 2)
+      else {
+        P(C.steelL, mid - 2, 1, 1, 2)
+        P(C.steelL, mid + 1, 1, 1, 2)
+      }
+      return
+    case 'designer': // a sailor's striped shirt
+      for (let j = 0; j < bh; j++) P(j % 2 ? '#2f4f9c' : C.paper, 0, j, bw, 1)
+      return
+    case 'architect': // a hi-vis vest with its reflective band
+      P('#ff8a2a', 0, 0, bw, bh)
+      P('#ffb066', 0, 0, bw, 1)
+      P('#fff3a8', 0, bh >> 1, bw, 1)
+      return
+    case 'tester': // a white lab coat, open at the front, a pen in its pocket
+      P(C.page, 0, 0, bw, bh)
+      P(C.steelL, 0, bh - 1, bw, 1)
+      if (side) P(p.m, bw - 1, 0, 1, bh)
+      else {
+        P(p.m, mid - 1, 0, 2, bh)
+        P(C.red, 1, 1, 1, 2)
+      }
+      return
+    case 'reviewer': // a black gown with white bands at the collar
+      P('#2b2f45', 0, 0, bw, bh)
+      P('#4a5170', 0, 0, bw, 1)
+      if (side) P(C.white, bw - 2, 0, 2, 2)
+      else P(C.white, mid - 1, 0, 2, 3)
+      return
+    case 'explorer': // a khaki shirt, the straps of a pack, and the pack on its back
+      P('#d9c58a', 0, 0, bw, bh)
+      P('#efe0ae', 0, 0, bw, 1)
+      P(C.woodD, 1, 0, 1, bh)
+      if (side) {
+        P(I, -4, 0, 4, bh + 1)
+        P('#7a8a3f', -3, 1, 2, bh - 1)
+        P('#a3b35c', -3, 1, 2, 1)
+      } else P(C.woodD, bw - 2, 0, 1, bh)
+      return
+    case 'writer': // a long blue scarf, its end over the shoulder
+      P(SCARF, 0, 0, bw, 1)
+      if (side) {
+        P(I, -3, 0, 3, bh + 1)
+        P(SCARF, -2, 1, 2, bh - 1)
+        P(C.cream, -2, 2, 2, 1)
+      } else {
+        P(SCARF, 1, 1, 2, bh - 2)
+        P(C.cream, 1, 2, 2, 1)
+      }
+      return
+    case 'helper': // a tool belt
+      P(C.woodD, 0, bh - 2, bw, 1)
+      P(C.amber, side ? bw - 2 : mid - 1, bh - 2, side ? 1 : 2, 1)
+      return
+  }
+}
+const TIE = '#2f4f9c'
+const SCARF = '#5b8def'
 
 function eyesOn(g: Px, vx: number, vy: number, vw: number, vh: number, m: Eyes, f: number, view: string, small: boolean) {
   const c = m === 'x' ? C.red : C.glow
@@ -385,10 +517,109 @@ function eyesOn(g: Px, vx: number, vy: number, vw: number, vh: number, m: Eyes, 
   }
 }
 
+/** How a role gets about when it is not sitting: on two feet, on a monowheel, on tracks, or under a gown that reaches the floor. */
+type Ride = 'feet' | 'wheel' | 'tracks' | 'gown'
+const RIDE: Record<string, Ride> = { coder: 'wheel', architect: 'tracks', reviewer: 'gown' }
+const GOWN = '#2b2f45'
+
+/** What is under a robot that does not walk on two feet. `foot` is the row under its body; `step` turns the wheel or the tracks. */
+function undercarriage(g: Px, ride: Ride, x: number, y: number, bl: number, bw: number, foot: number, step: number) {
+  const I = C.ink
+  if (ride === 'wheel') {
+    // a monowheel: the tyre, the hub, and a spoke that turns
+    R(g, I, x - 1, y - 5, 3, 5)
+    R(g, I, x - 2, y - 4, 5, 3)
+    R(g, C.steelD, x - 1, y - 4, 3, 3)
+    R(g, C.steelL, x, y - 3, 1, 1)
+    R(g, C.steelL, step ? x - 1 : x, step ? y - 3 : y - 4, 1, 1)
+    R(g, C.steelL, step ? x + 1 : x, step ? y - 3 : y - 2, 1, 1)
+  } else if (ride === 'tracks') {
+    // caterpillar tracks, their links going round
+    const w = Math.max(10, bw + 2)
+    const x0 = x - (w >> 1)
+    R(g, I, x0 + 1, y - 3, w - 2, 3)
+    R(g, I, x0, y - 2, w, 1)
+    R(g, C.steelD, x0 + 1, y - 2, w - 2, 1)
+    for (let i = step; i < w - 2; i += 2) R(g, C.steelL, x0 + 1 + i, y - 2, 1, 1)
+  } else if (ride === 'gown') {
+    // the gown flares and reaches the floor
+    R(g, I, bl - 2, foot, bw + 4, y - foot)
+    R(g, GOWN, bl - 1, foot, bw + 2, y - foot - 1)
+  }
+}
+
+/**
+ * What a role has in its free hand, held up in front of it. `T` draws from the robot's middle
+ * toward its face and down from the top of its body; the hand is at (6, 1).
+ */
+const TOOLS: Record<string, (T: (c: string, dx: number, dy: number, w: number, h: number) => void, t: number) => void> = {
+  coder(T) {
+    // a smoothie with a straw
+    T(C.ink, 5, -3, 5, 5)
+    T('#ff8fc0', 6, -2, 3, 3)
+    T(C.white, 6, -2, 3, 1)
+    T(C.yellow, 8, -6, 1, 3)
+  },
+  designer(T) {
+    // a palette and a brush loaded with red
+    T(C.ink, 5, -3, 6, 5)
+    T(C.cream, 6, -2, 4, 3)
+    T(C.red, 6, -2, 1, 1)
+    T(C.yellow, 8, -2, 1, 1)
+    T(C.teal, 9, -1, 1, 1)
+    T(C.blue, 7, 0, 1, 1)
+    T(C.woodL, 10, -6, 1, 3)
+    T(C.red, 10, -8, 1, 2)
+  },
+  architect(T) {
+    // a folding rule, held upright
+    T(C.ink, 6, -9, 3, 11)
+    T(C.yellow, 7, -8, 1, 9)
+    for (let j = -7; j < 1; j += 2) T(C.ink, 7, j, 1, 1)
+  },
+  tester(T, t) {
+    // a fly swatter for the bugs
+    const swat = Math.floor(t * 9) % 2
+    T(C.steelL, 7, -4 + swat, 1, 5 - swat)
+    T(C.ink, 5, -10 + swat, 5, 6)
+    T('#a8cc3c', 6, -9 + swat, 3, 4)
+    T(C.ink, 6, -8 + swat, 1, 1)
+    T(C.ink, 8, -8 + swat, 1, 1)
+    T(C.ink, 7, -7 + swat, 1, 1)
+  },
+  reviewer(T) {
+    // a magnifying glass, held up to the eye
+    T(C.woodL, 7, -2, 1, 3)
+    T(C.ink, 6, -7, 3, 5)
+    T(C.ink, 5, -6, 5, 3)
+    T(C.tealL, 6, -6, 3, 3)
+    T(C.white, 6, -6, 1, 1)
+  },
+  explorer(T, t) {
+    // a burning torch
+    const flick = Math.floor(t * 9) % 2
+    T(C.woodL, 7, -3, 1, 4)
+    T(C.ink, 6, -4, 3, 1)
+    T('#e8501f', 6, -7, 3, 3)
+    T(C.amber, 6 + flick, -6, 2, 2)
+    T(C.lamp, 7, -5, 1, 1)
+    T('#e8501f', flick ? 6 : 8, -8, 1, 1)
+  },
+  helper(T) {
+    // a wrench
+    T(C.steelL, 7, -4, 1, 5)
+    T(C.ink, 5, -9, 5, 5)
+    T(C.steelL, 6, -8, 1, 3)
+    T(C.steelL, 8, -8, 1, 3)
+    T(C.steelL, 6, -6, 3, 1)
+  },
+}
+
 export function bot(g: Px, x: number, y: number, o: BotOpts) {
   x = Math.trunc(x)
   y = Math.trunc(y)
-  const p = o.paint ?? MAIN_ROLE.paint
+  const info = roleInfo(o.role ?? 'main')
+  const p = o.paint ?? info.paint
   const small = !!o.small
   const f = o.face ?? 1
   const view = o.view ?? 'side'
@@ -398,14 +629,17 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
   const hw = small ? 10 : 12, hh = small ? 8 : 9, bw = (small ? 6 : 8) + 2 * (o.girth ?? 0), bh = small ? 4 : 5
   const walk = pose === 'walk' || pose === 'carry'
   const sit = !!o.seated || pose === 'type' || pose === 'sit'
+  const ride: Ride = view === 'side' ? (RIDE[info.id] ?? 'feet') : 'feet'
   const fr = Math.floor(t * 9) % 2
   const slow = Math.floor(t * 1.6) % 2
   if (pose === 'err') x += Math.floor(t * 22) % 2 ? 1 : -1
-  // a seated robot keeps still on its stool; standing, it bobs
-  const lift = walk ? fr : pose === 'sleep' || sit ? 0 : slow
+  // a seated robot keeps still on its stool; standing, it bobs; on a wheel or on tracks it glides
+  const glides = ride === 'wheel' || ride === 'tracks'
+  const lift = walk ? (glides ? 0 : fr) : pose === 'sleep' || sit ? 0 : slow
   const X = (dx: number, w: number) => (f > 0 ? x + dx : x - dx - w)
-  const base = sit ? y : y - 2
-  if (!sit) {
+  // what it stands on is as tall as two feet, or as its tracks, or as its wheel
+  const base = sit ? y : y - (ride === 'wheel' ? 4 : ride === 'tracks' ? 3 : 2)
+  if (!sit && ride === 'feet') {
     if (view === 'side') {
       const a = walk ? (fr ? [-3, 1] : [-1, -1]) : [-3, 1]
       R(g, I, X(a[0]!, 2), y - 2, 2, 2)
@@ -426,7 +660,11 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
   R(g, p.m, bl, by, bw, bh)
   R(g, p.d, f > 0 || view !== 'side' ? bl : bl + bw - 2, by, 2, bh)
   R(g, p.l, bl, by, bw, 1)
-  if (view !== 'back') R(g, o.chest ?? C.glow, view === 'side' ? X(1, 2) : x - 1, by + 2, 2, 1)
+  if (view !== 'back') {
+    R(g, o.chest ?? C.glow, view === 'side' ? X(1, 2) : x - 1, by + 2, 2, 1)
+    outfit(g, info.id, bl, by, bw, bh, view === 'side', f, p)
+  }
+  if (!sit) undercarriage(g, ride, x, y, bl, bw, by + bh, walk ? fr : 0)
   const hl = x - (hw >> 1)
   const hy = by - hh + 1
   R(g, I, hl, hy - 1, hw, hh + 2)
@@ -435,7 +673,7 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
   R(g, p.l, hl, hy, hw, 1)
   R(g, p.l, hl, hy, 1, 3)
   R(g, p.d, hl, hy + hh - 1, hw, 1)
-  headgear(g, o.gear ?? 'antenna', x, hy, hw, view === 'side', f, o.bulb ?? (Math.floor(t * 2) % 2 ? C.amber : C.lamp))
+  headgear(g, o.gear ?? info.headgear, x, hy, hw, hh, view === 'side', f, o.bulb ?? (Math.floor(t * 2) % 2 ? C.amber : C.lamp))
   if (view === 'back') {
     R(g, p.d, hl + 2, hy + 3, hw - 4, 1)
     R(g, p.d, hl + 2, hy + 5, hw - 4, 1)
@@ -449,6 +687,10 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
   }
   if (view === 'side') {
     const half = bw >> 1
+    const T = (c: string, dx: number, dy: number, w: number, h: number) => R(g, c, X(dx, w), by + dy, w, h)
+    // a hand is free on the way somewhere and while it waits
+    const free = !!o.tool && (pose === 'walk' || pose === 'stand')
+    const tool = free ? TOOLS[info.id] : undefined
     if (pose === 'type') {
       const tf = Math.floor(t * 10) % 2
       R(g, S, X(2, half + 3), by, half + 3, 1)
@@ -468,12 +710,23 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
         R(g, C.paper, X(4, 5), by - 3, 5, 4)
         R(g, C.amber, X(4, 5), by - 3, 5, 1)
       }
-    } else if (pose === 'read') {
+    } else if (pose === 'read' || (free && info.id === 'writer')) {
+      // the writer walks with its nose in a book
       R(g, S, X(2, 4), by + 2, 4, 1)
       R(g, C.blue, X(4, 5), by - 2, 5, 4)
       R(g, C.paper, X(5, 3), by - 1, 3, 2)
     } else if (pose === 'cheer') R(g, S, X(1, 2), by - hh - 2, 2, hh + 3)
-    else {
+    else if (tool) {
+      R(g, S, X(2, 5), by + 1, 5, 1)
+      tool(T, t)
+    } else if (o.tool && pose === 'sit' && info.id === 'main') {
+      // the boss's stick: up, then down on the desk
+      R(g, S, X(2, 5), by + 1, 5, 1)
+      if (slow) {
+        T(C.woodL, 6, 1, 7, 1)
+        T(C.amber, 12, -1, 1, 1)
+      } else for (let i = 0; i < 9; i++) T(C.woodL, 6 + ((i + 1) >> 1), 1 - i, 2, 1)
+    } else {
       const sw = walk ? (fr ? 1 : -1) : 0
       R(g, S, X(sw, 2), by + 1, 2, bh - 2)
       R(g, I, X(sw, 2), by + bh - 1, 2, 1)
@@ -510,6 +763,12 @@ function cloud(g: Px, x: number, y: number, w: number, h: number, tx0: number, t
   const cx = clamp(tx0, x + 6, x + w - 6)
   const midx = Math.round((cx + tx0) / 2)
   const by = y + h + 3
+  if (ty0 - by < 6) {
+    // the cloud sits right over the head: one small bubble under it
+    R(g, C.ink, cx - 2, by - 1, 4, 4)
+    R(g, C.paper, cx - 1, by, 2, 2)
+    return
+  }
   R(g, C.ink, midx - 3, by - 1, 6, 5)
   R(g, C.paper, midx - 2, by, 4, 3)
   const ey = Math.round(by + (ty0 - by) * 0.7)
@@ -590,10 +849,10 @@ function check(g: Px, x: number, y: number, c: string) {
   const pts: Array<[number, number]> = [[0, 5], [1, 6], [2, 7], [3, 8], [4, 7], [5, 6], [6, 5], [7, 4], [8, 3], [9, 2], [10, 1]]
   for (const [i, j] of pts) R(g, c, x + i, y + j, 2, 2)
 }
-function cross(g: Px, x: number, y: number, c: string) {
-  for (let i = 0; i < 10; i++) {
+function cross(g: Px, x: number, y: number, c: string, n = 10) {
+  for (let i = 0; i < n; i++) {
     R(g, c, x + i, y + i, 2, 2)
-    R(g, c, x + 9 - i, y + i, 2, 2)
+    R(g, c, x + n - 1 - i, y + i, 2, 2)
   }
 }
 
@@ -608,13 +867,13 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
       for (let i = 0; i < 3; i++) R(g, i < n ? C.ink : C.steel, cx + 7 + i * 5, cy - 1, 3, 3)
       return
     }
-    tx(g, label || 'THINKING', cx + 11, y + 6, C.ink)
+    tx(g, fit(label || 'THINKING', w - 22), cx + 11, y + 6, C.ink)
     for (let i = 0; i < 3; i++) R(g, i < n ? C.coralD : C.steel, cx + 11 + i * 5, y + 15, 3, 3)
   },
   search(g, x, y, w, h, a, label, sm) {
     if (!sm) tx(g, fit(label, w - 2), x, y, C.violetD)
     const top = sm ? y : y + 8
-    const rows = sm ? 4 : 6
+    const rows = sm ? 3 : 6
     for (let i = 0; i < rows; i++) {
       const hit = i === (Math.floor(a * 2) % rows)
       R(g, hit ? C.amber : C.steel, x + (i % 3) * 2, top + i * 4, w - 8 - ((i * 5) % 14), hit ? 2 : 1)
@@ -630,8 +889,8 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
     const ab = sm ? y + 4 : y + 5
     R(g, C.steelL, x + 2, ab, w - 4, sm ? 2 : 7)
     if (!sm) tx(g, fit(label, w - 8), x + 3, ab + 1, C.ink)
-    const rtop = sm ? y + 8 : y + 14
-    const n = sm ? 2 : 3
+    const rtop = sm ? y + 7 : y + 14
+    const n = sm ? 1 : 3
     // the page loads a line at a time
     const shown = sm ? 2 : 1 + (Math.floor(a * 2.2) % 3)
     for (let i = 0; i < n && i < shown; i++) {
@@ -687,7 +946,7 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
     const b = Math.floor(a * 3) % 2
     if (sm) {
       R(g, C.amber, x, y, w, h)
-      tx(g, '?', x + (w >> 1) - 1, y + 4 - b, C.ink)
+      tx(g, '?', x + (w >> 1) - 1, y + 3 - b, C.ink)
       return
     }
     const q = [[0, 1, 1, 0], [1, 0, 0, 1], [0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 1, 0]]
@@ -717,16 +976,16 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
   },
   talk(g, x, y, w, h, a, label, sm) {
     const n = 1 + (Math.floor(a * 3) % 3)
-    for (let i = 0; i < n; i++) R(g, C.steelD, x + 2, y + (sm ? 2 : 9) + i * 4, w - 8 - ((i * 9) % 16), 2)
+    for (let i = 0; i < n; i++) R(g, C.steelD, x + 2, y + (sm ? 1 + i * 3 : 9 + i * 4), w - 8 - ((i * 9) % 16), 2)
     if (!sm) tx(g, fit(label, w - 4), x + 2, y, C.violetD)
   },
   done(g, x, y, w, h, a, label, sm) {
-    check(g, sm ? x + ((w - 12) >> 1) : x + 6, sm ? y + 1 : y + 8, C.greenD)
-    if (!sm) tx(g, fit(label, w - 22), x + 21, y + 12, C.ink)
+    check(g, sm ? x + ((w - 12) >> 1) : x + 4, sm ? y : y + ((h - 11) >> 1), C.greenD)
+    if (!sm) tx(g, fit(label, w - 22), x + 21, y + ((h - 5) >> 1), C.ink)
   },
   error(g, x, y, w, h, a, label, sm) {
-    cross(g, sm ? x + ((w - 11) >> 1) : x + 6, sm ? y + 1 : y + 7, C.red)
-    if (!sm) tx(g, fit(label, w - 22), x + 21, y + 12, C.redD)
+    cross(g, sm ? x + ((w - 9) >> 1) : x + 4, sm ? y : y + ((h - 11) >> 1), C.red, sm ? 8 : 10)
+    if (!sm) tx(g, fit(label, w - 22), x + 21, y + ((h - 5) >> 1), C.redD)
   },
 }
 BUB.mcp = BUB.web
@@ -817,7 +1076,7 @@ const PRINTER = { x: 4, y: 72, w: 38, h: 44 }
 const PLATE_Y = PRINTER.y + PRINTER.h - 12
 const EXIT_X = PRINTER.x + PRINTER.w + 2
 // The gantry rises a layer at a time as it prints, and parks up top, to the left, when idle.
-const PRINT_RISE = 20
+const PRINT_RISE = 23
 const PARK_TIP = PLATE_Y - 1 - PRINT_RISE
 const PARK_X = PRINTER.x + 11
 const LCD = { x: PRINTER.x + 5, y: PLATE_Y + 6, w: 11, h: 3 }
@@ -889,7 +1148,7 @@ export function seatFor(seat: number, floors: number): Seat | null {
   if (floor > floors) return null
   const x = UPPER_X[k % PER_FLOOR]!
   const fy = gy - floor * FLOOR_H + 46
-  return { x, y: fy - 6, floorY: fy, floor, monX: x + 10, monY: fy - 17, bubble: { x: Math.max(2, Math.min(W - 34, x - 16)), y: fy - 43 } }
+  return { x, y: fy - 6, floorY: fy, floor, monX: x + 10, monY: fy - 17, bubble: { x: Math.max(2, Math.min(W - 34, x - 20)), y: fy - 43 } }
 }
 
 /**
@@ -908,6 +1167,26 @@ function stool(g: Px, x: number, fy: number, w: number) {
     R(g, C.ink, lx + out, top + 4, 2, 1)
     R(g, C.woodD, lx + (out > 0 ? 0 : 1), top + 3, 1, 1)
   }
+}
+
+/** The main agent's chair: leather, with a high buttoned back, on a pedestal. Its seat is where a stool's top would be. */
+function bossChair(g: Px, x: number, fy: number) {
+  const top = fy - 5
+  const L = '#8a3340'
+  // the back, up to the top of the head
+  R(g, C.ink, x - 9, top - 14, 3, 1)
+  R(g, C.ink, x - 10, top - 13, 5, 14)
+  R(g, L, x - 9, top - 13, 3, 13)
+  R(g, '#b85562', x - 9, top - 13, 1, 13)
+  for (let j = top - 11; j < top - 1; j += 4) R(g, C.amber, x - 8, j, 1, 1)
+  // the seat, the pedestal and its feet
+  R(g, C.ink, x - 7, top, 13, 3)
+  R(g, '#b85562', x - 6, top, 11, 1)
+  R(g, L, x - 6, top + 1, 11, 1)
+  R(g, C.ink, x - 1, top + 3, 2, 1)
+  R(g, C.ink, x - 5, top + 4, 10, 1)
+  R(g, C.steelD, x - 5, top + 4, 1, 1)
+  R(g, C.steelD, x + 4, top + 4, 1, 1)
 }
 
 /** A workstation for a robot sitting at x: stool, desk with drawers, PC, monitor, keyboard. */
@@ -938,59 +1217,91 @@ function workstation(g: Px, x: number, fy: number) {
   R(g, C.steelL, x + 4, top - 3, 3, 1)
 }
 
-/** The kit each role keeps on its desk, shown while that robot sits there. */
-export function deskProp(g: Px, roleId: string, x: number, fy: number) {
-  const top = fy - 17
+/**
+ * The kit each role keeps on top of its monitor while it sits there. It stands on the bottom row
+ * of a canvas twelve pixels wide.
+ */
+export const KIT = { w: 12, h: 9 }
+export function deskProp(g: Px, roleId: string) {
   const I = C.ink
+  const b = KIT.h - 1
   switch (roleId) {
-    case 'designer': // a fan of colour swatches
-      R(g, I, x + 29, top - 7, 6, 6)
-      R(g, '#e86aa6', x + 30, top - 6, 1, 4)
-      R(g, C.yellow, x + 31, top - 6, 1, 4)
-      R(g, C.teal, x + 32, top - 6, 1, 4)
-      R(g, C.blue, x + 33, top - 6, 1, 4)
+    case 'designer': // a painter's palette with dabs of paint and a thumb hole
+      R(g, I, 1, b - 5, 9, 6)
+      R(g, I, 0, b - 4, 11, 4)
+      R(g, C.cream, 1, b - 4, 9, 4)
+      R(g, C.red, 2, b - 4, 2, 1)
+      R(g, C.yellow, 5, b - 4, 2, 1)
+      R(g, C.teal, 8, b - 3, 1, 2)
+      R(g, C.blue, 2, b - 2, 2, 1)
+      R(g, I, 5, b - 2, 2, 1)
       return
-    case 'architect': // a rolled blueprint
-      R(g, I, x + 28, top - 5, 8, 4)
-      R(g, C.blue, x + 29, top - 4, 6, 2)
-      R(g, '#a9ccff', x + 29, top - 4, 6, 1)
-      R(g, C.paper, x + 29, top - 4, 1, 2)
+    case 'architect': // a scale model of a house
+      R(g, I, 4, b - 6, 3, 1)
+      R(g, I, 3, b - 5, 5, 1)
+      R(g, C.blue, 4, b - 5, 3, 1)
+      R(g, I, 2, b - 4, 7, 1)
+      R(g, C.blue, 3, b - 4, 5, 1)
+      R(g, I, 1, b - 3, 9, 1)
+      R(g, I, 2, b - 2, 7, 3)
+      R(g, C.paper, 3, b - 2, 5, 2)
+      R(g, C.woodD, 5, b - 2, 1, 2)
       return
-    case 'coder': // an energy drink
-      R(g, I, x + 30, top - 8, 4, 7)
-      R(g, C.green, x + 31, top - 7, 2, 5)
-      R(g, C.steelL, x + 31, top - 7, 2, 1)
+    case 'coder': // a rubber duck to explain the bug to
+      R(g, I, 4, b - 6, 5, 4)
+      R(g, I, 1, b - 4, 8, 5)
+      R(g, C.yellow, 5, b - 5, 3, 2)
+      R(g, C.yellow, 2, b - 3, 6, 3)
+      R(g, '#fff3a8', 2, b - 3, 3, 1)
+      R(g, '#ff8a2a', 8, b - 4, 2, 1)
+      R(g, I, 6, b - 5, 1, 1)
       return
-    case 'tester': // test tubes in a rack
-      R(g, C.woodD, x + 29, top - 4, 6, 2)
-      R(g, I, x + 30, top - 8, 1, 5)
-      R(g, '#a8cc3c', x + 30, top - 6, 1, 2)
-      R(g, I, x + 33, top - 8, 1, 5)
-      R(g, C.red, x + 33, top - 6, 1, 2)
+    case 'tester': // a flask of something green
+      R(g, I, 4, b - 6, 4, 3)
+      R(g, C.page, 5, b - 5, 2, 2)
+      R(g, I, 3, b - 3, 6, 1)
+      R(g, C.page, 4, b - 3, 4, 1)
+      R(g, I, 2, b - 2, 8, 3)
+      R(g, '#a8cc3c', 3, b - 2, 6, 2)
+      R(g, '#dcf59a', 3, b - 2, 6, 1)
+      R(g, C.white, 5, b - 1, 1, 1)
       return
-    case 'reviewer': // a stack of papers and a red pen
-      R(g, I, x + 28, top - 5, 7, 4)
-      R(g, C.paper, x + 29, top - 4, 5, 1)
-      R(g, C.cream, x + 29, top - 3, 5, 1)
-      R(g, C.red, x + 29, top - 6, 5, 1)
+    case 'reviewer': // a clipboard with a red tick on it
+      R(g, I, 2, b - 6, 8, 7)
+      R(g, C.paper, 3, b - 5, 6, 5)
+      R(g, C.steelL, 5, b - 7, 2, 2)
+      R(g, C.red, 4, b - 3, 1, 1)
+      R(g, C.red, 5, b - 2, 1, 1)
+      R(g, C.red, 6, b - 3, 1, 1)
+      R(g, C.red, 7, b - 4, 1, 1)
       return
     case 'explorer': // a desk globe
-      disc(g, I, x + 31, top - 6, 3)
-      disc(g, '#2d6e9a', x + 31, top - 6, 2)
-      R(g, C.green, x + 30, top - 7, 2, 1)
-      R(g, C.green, x + 32, top - 5, 1, 1)
-      R(g, I, x + 29, top - 2, 5, 1)
+      disc(g, I, 5, b - 4, 3)
+      disc(g, '#3f8fc4', 5, b - 4, 2)
+      R(g, C.green, 4, b - 5, 2, 1)
+      R(g, C.green, 4, b - 4, 1, 1)
+      R(g, C.green, 6, b - 3, 1, 1)
+      R(g, I, 3, b, 5, 1)
       return
-    case 'writer': // a pile of books
-      R(g, I, x + 28, top - 7, 7, 6)
-      R(g, C.coral, x + 29, top - 6, 5, 1)
-      R(g, C.blue, x + 29, top - 4, 5, 1)
-      R(g, C.amber, x + 29, top - 2, 5, 1)
+    case 'writer': // a typewriter with a page in it
+      R(g, I, 0, b - 5, 11, 3)
+      R(g, C.steelL, 1, b - 4, 9, 1)
+      R(g, I, 2, b - 8, 7, 5)
+      R(g, C.paper, 3, b - 7, 5, 4)
+      R(g, C.steelD, 4, b - 6, 3, 1)
+      R(g, C.steelD, 4, b - 4, 2, 1)
+      R(g, I, 1, b - 2, 9, 3)
+      R(g, '#4a5170', 2, b - 2, 7, 2)
+      R(g, C.cream, 3, b - 1, 5, 1)
       return
-    default: // a mug of coffee
-      R(g, I, x + 30, top - 6, 4, 5)
-      R(g, C.cream, x + 31, top - 5, 2, 3)
-      R(g, I, x + 34, top - 5, 1, 2)
+    default: // a toolbox
+      R(g, I, 4, b - 6, 4, 1)
+      R(g, I, 4, b - 5, 1, 1)
+      R(g, I, 7, b - 5, 1, 1)
+      R(g, I, 1, b - 4, 10, 5)
+      R(g, C.red, 2, b - 3, 8, 3)
+      R(g, C.redD, 2, b - 1, 8, 1)
+      R(g, C.amber, 5, b - 3, 2, 2)
   }
 }
 
@@ -1181,7 +1492,7 @@ function paintGround(home: string): Px {
   R(g, C.ink, 142, 105, 5, 2)
   R(g, C.ink, 117, 105, 13, 2)
   R(g, C.steelL, 118, 105, 11, 1)
-  stool(g, MAIN_X, FY, 12)
+  bossChair(g, MAIN_X, FY)
   // a warning sign over the recycling hatch
   R(g, C.ink, 175, 86, 9, 8)
   R(g, C.amber, 176, 87, 7, 6)
@@ -1257,7 +1568,7 @@ function employeeFrame(tally: TokenTally | undefined, now: number, detail: Detai
   const best = champion(tally, now)
   const role = roleInfo(best?.role ?? 'main')
   const face = new Px(12, 12)
-  if (best) bot(face, 6, 18, { paint: role.paint, small: true, gear: role.headgear, view: 'front', pose: 'stand', eyes: 'happy' })
+  if (best) bot(face, 6, 19, { role: role.id, small: true, view: 'front', pose: 'stand', eyes: 'happy' })
   else tx(face, '?', 5, 4, GOLD)
   // the title, then the employee's tokens and the whole day's; before anyone has earned it, the frame says so
   tx(g, 'EMPLOYEE', 21, 4, GOLD_L)
@@ -1531,21 +1842,42 @@ function lookFor(kind: ActivityKind, seated: boolean): BotLook {
   return { pose: seated ? 'type' : 'stand', eyes: 'open' }
 }
 
-function robotFrames(roleId: string, look: BotLook, small: boolean, detail: Detail, seated = false, girth = 0): string {
-  const { paint, headgear: gear } = roleInfo(roleId)
+function robotFrames(roleId: string, look: BotLook, small: boolean, detail: Detail, seated = false, girth = 0, tool = false): string {
   const fast = look.pose === 'type' || look.pose === 'raise' || look.pose === 'err'
   const times = fast ? [0, 0.11] : [0, 0.65]
   const durs = fast ? [0.12, 0.12] : [0.6, 0.6]
-  return sprite(26, 34, times, durs, detail, (g, t) => bot(g, 13, 32, { paint, small, gear, pose: look.pose, eyes: look.eyes, t, seated, girth }))
+  return sprite(26, 34, times, durs, detail, (g, t) => bot(g, 13, 32, { role: roleId, small, pose: look.pose, eyes: look.eyes, t, seated, girth, tool }))
 }
 
 const CLOUD_W = 32
-const CLOUD_H = 17
+const CLOUD_H = 14
+const MAIN_CLOUD = { w: 80, h: 34 }
+/** The main agent's cloud is as big as what it has to say: a word or a tick gets a small one, a page a full one. */
+export function cloudSize(kind: ActivityKind | 'break', label: string): [w: number, h: number] {
+  const text = (s: string) => tw(fit(s, 50))
+  switch (kind) {
+    case 'think':
+      return [28 + text(label || 'THINKING'), 24]
+    case 'done':
+    case 'error':
+      return [label ? 30 + text(label) : 24, 22]
+    case 'ask':
+      return [26 + Math.max(tw('CAN I?'), text(label)), 30]
+    case 'talk':
+      return [Math.max(40, 10 + text(label)), 26]
+    default:
+      return [MAIN_CLOUD.w, MAIN_CLOUD.h]
+  }
+}
 function bubbleSvg(kind: ActivityKind | 'break', label: string, sm: boolean, x: number, y: number, tailX: number, tailY: number, detail: Detail): string {
   const f = kind === 'break' ? coffeeBreak : BUB[kind]
   if (!f) return ''
-  const w = sm ? CLOUD_W : 80
-  const h = sm ? CLOUD_H : 34
+  const [w, h] = sm ? [CLOUD_W, CLOUD_H] : cloudSize(kind, label)
+  if (!sm) {
+    // a smaller cloud stays over the robot's head, with its foot where the full one's is
+    x = Math.min(x + MAIN_CLOUD.w - w, Math.max(x, tailX - (w >> 1)))
+    y += MAIN_CLOUD.h - h
+  }
   const shell = new Px(w + 40, h + 40)
   cloud(shell, 1, 1, w, h, tailX - x + 1, tailY - y + 1)
   const times = [0, 0.45, 0.9, 1.35]
@@ -1980,13 +2312,12 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     const p = phaseOf(r, floors)
     if (!p || (p.goneAt !== null && p.goneAt <= now)) continue
     const role = r.role ?? roleOf(r.type, r.description)
-    const { paint, headgear: gear } = roleInfo(role)
     const girth = girthOf(r.context)
     if (p.printEnd > now) {
       const cx = PRINTER.x + (PRINTER.w >> 1)
       const id = `clip-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
       const g = new Px(26, 34)
-      bot(g, 13, 32, { paint, small: true, gear, pose: 'stand', eyes: 'off', bulb: C.steelD, girth })
+      bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'off', bulb: C.steelD, girth })
       const b = s2(sec(p.feedEnd))
       const d = s2((p.printEnd - p.feedEnd) / 1000)
       // the printer builds one robot at a time: this one's turn starts when the one before is done
@@ -2007,14 +2338,14 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     // Riding the lift a robot stands still; a carrying robot keeps its arms full.
     const walker = (pose: Pose, eyes: Eyes, item?: 'report' | 'blueprint') => (face: number, riding: boolean) =>
       sprite(26, 34, riding ? [0] : [0, 0.11], [0.12, 0.12], detail, (g, t) =>
-        bot(g, 13, 32, { paint, small: true, gear, pose: riding && pose !== 'carry' ? 'stand' : pose, eyes, face, t, item, girth }),
+        bot(g, 13, 32, { role, small: true, pose: riding && pose !== 'carry' ? 'stand' : pose, eyes, face, t, item, girth, tool: true }),
       )
     const groundY = gy + FY
     if (p.briefAt > now) out += walkLegs(p.briefPts, p.briefCum, p.printEnd, now, walker('walk', 'open'))
     if (p.briefEnd > now) {
       // the main agent hands over the task's blueprint
-      const waiting = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { paint, small: true, gear, pose: 'stand', eyes: 'up', face: 1, girth }))
-      const holding = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { paint, small: true, gear, pose: 'carry', eyes: 'happy', face: 1, item: 'blueprint', girth }))
+      const waiting = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'up', face: 1, girth, tool: true }))
+      const holding = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'carry', eyes: 'happy', face: 1, item: 'blueprint', girth }))
       const caught = p.briefAt + 650
       out += during(sec(p.briefAt), sec(caught), at(BRIEF_X - 13, groundY - 32, waiting))
       out += during(sec(caught), sec(p.briefEnd), at(BRIEF_X - 13, groundY - 32, holding))
@@ -2035,9 +2366,9 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     const screenOn = sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
     const cloudOf = (kind: ActivityKind, label: string) =>
       detail >= 2 ? '' : bubbleSvg(kind, label, true, p.seat.bubble.x, p.seat.bubble.y, p.seat.x, seated - 18, detail)
-    const kit = new Px(10, 10)
-    deskProp(kit, role, -28, 26)
-    const props = at(p.seat.x + 9, p.seat.floorY - 27, kit.svg())
+    const kit = new Px(KIT.w, KIT.h)
+    deskProp(kit, role)
+    const props = at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, kit.svg())
     const working =
       props +
       at(p.seat.monX, p.seat.monY, screenOn) +
@@ -2053,7 +2384,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       // carrying the report down to the main desk
       out += walkLegs(p.leavePts, p.leaveCum, p.leaveAt, now, walker('carry', 'happy', 'report'))
       // handing it over: the robot faces the main agent and the report flies across
-      const standing = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { paint, small: true, gear, pose: 'stand', eyes: 'happy', face: -1, girth }))
+      const standing = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'happy', face: -1, girth, tool: true }))
       out += during(sec(p.handAt), sec(p.toHoleAt), at(DELIVER_X - 13, groundY - 32, standing))
       const paper = new Px(6, 5)
       R(paper, C.ink, 0, 0, 6, 5)
@@ -2079,7 +2410,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       R(open, '#4a4f70', HOLE_W, 0, 2, 7)
       out += during(sec(opened), sec(shut), at(HOLE_X0 - 1, groundY, open.svg()))
       drops.push({ open: opened, shut })
-      const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { paint, small: true, gear, pose: 'cheer', eyes: 'happy', girth }))
+      const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'cheer', eyes: 'happy', girth }))
       const a = `${HOLE_X - 13} ${groundY - 32}`
       const values = `${a};${HOLE_X - 13} ${groundY - 41};${HOLE_X - 13} ${gy + MELT_Y + 12 - 32}`
       const hop = (HOP_MS / (HOP_MS + FALL_MS)).toFixed(3)
@@ -2109,7 +2440,15 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       return !!p && (p.goneAt === null || p.goneAt > now)
     })
     const asleep = kind === 'idle' && !helpers
-    out += at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', lookFor(kind === 'idle' && helpers ? 'think' : kind, true), false, detail, true, girthOf(main.context)))
+    const look = lookFor(kind === 'idle' && helpers ? 'think' : kind, true)
+    // with nothing to type, the boss has its stick in its hand; otherwise the stick leans on the chair
+    const inHand = look.pose === 'sit' && !asleep
+    if (!inHand) {
+      const stick = new Px(4, 13)
+      for (let i = 0; i < 13; i++) R(stick, C.woodL, i >> 2, 12 - i, 1, 1)
+      out += at(MAIN_X - 14, gy + FY - 13, stick.svg())
+    }
+    out += at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand))
     if (main.id === selected) out += selectMark(MAIN_X, gy + SEAT_Y - 24)
     if (kind === 'idle' && helpers) {
       const busy = subs.filter((r) => r.status === 'working').length
@@ -2163,11 +2502,11 @@ export type TaskState = 'running' | 'waiting' | 'done' | 'failed' | 'idle'
 
 const BADGE: Record<TaskState, string> = { running: '#4f8fe6', waiting: C.amber, done: '#3fbf6a', failed: C.red, idle: '#6f7893' }
 
-/** A robot's portrait: its pixel head and shoulders on a glass tile, with a status badge. */
+/** A robot's portrait: its pixel head, its headgear and its collar on a glass tile, with a status badge. */
 export function avatarSvg(roleId: string, kind: ActivityKind, state: TaskState = 'running'): string {
   const role = roleInfo(roleId)
   const g = new Px(20, 20)
-  bot(g, 10, 26, { paint: role.paint, small: false, gear: role.headgear, view: 'front', pose: 'stand', eyes: lookFor(kind, false).eyes })
+  bot(g, 10, 23, { role: role.id, small: false, view: 'front', pose: 'stand', eyes: lookFor(kind, false).eyes })
   const id = `av${roleId}${state}`.replace(/[^a-zA-Z0-9]/g, '')
   const defs =
     `<defs><linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${role.paint.d}" stop-opacity="0.75"/><stop offset="1" stop-color="#121826"/></linearGradient>` +

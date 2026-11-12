@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { buildScene, CAPACITY, chartRows, exitSlot, fit, floorsFor, girthOf, hasStoodUp, layPicture, noLayers, phaseOf, positionOf, printSlot, roleOf, seatFor, skyKey, transitionsOf } from '../hooks/scene'
+import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, fit, floorsFor, girthOf, hasStoodUp, KIT, layPicture, noLayers, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, skyKey, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -390,4 +390,62 @@ test('a label too long for its bubble is cut on a whole word and says so', () =>
   expect(fit('docs.python.org', 66)).toBe('DOCS.PYTHON.ORG')
   // one long word is cut where it must be
   expect(fit('office.test.tsx', 40)).toBe('OFFICE.TE..')
+})
+
+const ROLE_IDS = ['main', 'coder', 'designer', 'architect', 'tester', 'reviewer', 'explorer', 'writer', 'helper']
+const GREY = { l: '#dddddd', m: '#aaaaaa', d: '#777777' }
+/** A robot drawn on a small canvas: the picture, and the topmost row it paints. */
+const drawn = (role: string, more: Parameters<typeof bot>[3] = {}) => {
+  const g = new Px(30, 36)
+  bot(g, 15, 34, { role, small: true, paint: GREY, ...more })
+  const svg = g.svg()
+  const top = Math.min(...[...svg.matchAll(/M\d+ (\d+)h/g)].map((m) => Number(m[1])))
+  return { svg, top }
+}
+
+test('a role is told apart by what it wears and keeps on its desk, not by its paint alone', () => {
+  // every robot in the same grey: the headgear and the clothes still make nine different robots
+  for (const view of ['side', 'front'] as const) expect(new Set(ROLE_IDS.map((r) => drawn(r, { view }).svg)).size).toBe(ROLE_IDS.length)
+  const kits = ROLE_IDS.slice(1).map((r) => {
+    const g = new Px(KIT.w, KIT.h)
+    deskProp(g, r)
+    return g.svg()
+  })
+  expect(new Set(kits).size).toBe(kits.length)
+})
+
+test("no headgear is taller than the room under a helper's cloud", () => {
+  // seated, the head's top row is 23 on this canvas; seven rows over it are free
+  for (const r of ROLE_IDS.slice(1)) expect(drawn(r, { seated: true, pose: 'type' }).top).toBeGreaterThanOrEqual(16)
+})
+
+test('on its way with a hand free a robot holds what its job is known for', () => {
+  const SMOOTHIE = '#ff8fc0'
+  expect(drawn('coder', { pose: 'walk', tool: true }).svg).toContain(SMOOTHIE)
+  // with a blueprint in its arms, and at its desk, it does not
+  expect(drawn('coder', { pose: 'carry', item: 'blueprint', tool: true }).svg).not.toContain(SMOOTHIE)
+  expect(drawn('coder', { pose: 'type', seated: true, tool: true }).svg).not.toContain(SMOOTHIE)
+  // every role has something of its own to hold
+  const held = ROLE_IDS.slice(1).map((r) => drawn(r, { pose: 'walk', tool: true }).svg)
+  const empty = ROLE_IDS.slice(1).map((r) => drawn(r, { pose: 'walk' }).svg)
+  held.forEach((svg, i) => expect(svg).not.toBe(empty[i]))
+})
+
+test('the coder rides a monowheel: it glides where the others step', () => {
+  const stride = (role: string) => [0, 0.12].map((t) => drawn(role, { pose: 'walk', t }).top)
+  const [c0, c1] = stride('coder')
+  const [d0, d1] = stride('designer')
+  expect(c0).toBe(c1)
+  expect(d0).not.toBe(d1)
+})
+
+test("the main agent's cloud is as big as what it has to say", () => {
+  const [full, tall] = cloudSize('read', 'register.tsx')
+  expect([full, tall]).toEqual([80, 34])
+  const [thinkW, thinkH] = cloudSize('think', '')
+  expect(thinkW).toBeLessThan(full)
+  expect(thinkH).toBeLessThan(tall)
+  // a tick alone needs the least; a long label never makes a cloud wider than the full one
+  expect(cloudSize('done', '')[0]).toBeLessThan(thinkW)
+  for (const kind of ['think', 'done', 'error', 'ask', 'talk'] as const) expect(cloudSize(kind, 'a very long label that goes on and on and on')[0]).toBeLessThanOrEqual(full)
 })

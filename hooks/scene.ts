@@ -654,7 +654,16 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
   const by = base - bh - lift
   const bl = x - (bw >> 1)
   const S = C.steelD
-  if (view === 'side' && pose === 'cheer') R(g, S, X(-3, 2), by - hh - 2, 2, hh + 3)
+  // An arm held up: it comes out from behind the head and goes up beside it, never across the
+  // face. `dir` is 1 for the arm on the face's side, -1 for the one at the back.
+  const armUp = (dir: 1 | -1, wave = 0) => {
+    const e = hw >> 1
+    const col = (d: number) => (dir > 0 ? X(e + d, 2) : X(-e - d - 2, 2))
+    R(g, S, col(1), by - 3, 2, 4)
+    R(g, S, col(2), by - 6, 2, 3)
+    R(g, p.l, col(2 + wave), by - 8, 2, 2)
+  }
+  if (view === 'side' && pose === 'cheer') armUp(-1)
   R(g, I, bl - 1, by, bw + 2, bh + 1)
   R(g, I, bl, by - 1, bw, bh + 2)
   R(g, p.m, bl, by, bw, bh)
@@ -696,9 +705,7 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
       R(g, S, X(2, half + 3), by, half + 3, 1)
       R(g, I, X(half + 4, 2), by + tf, 2, 1)
     } else if (pose === 'raise') {
-      const wv = Math.floor(t * 4) % 2
-      R(g, S, X(1, 2), hy - 3, 2, by - hy + 5)
-      R(g, p.l, X(1 + wv, 2), hy - 5, 2, 2)
+      armUp(1, Math.floor(t * 4) % 2)
     } else if (pose === 'carry') {
       R(g, S, X(2, 5), by + 1, 5, 1)
       if (o.item === 'blueprint') {
@@ -715,7 +722,7 @@ export function bot(g: Px, x: number, y: number, o: BotOpts) {
       R(g, S, X(2, 4), by + 2, 4, 1)
       R(g, C.blue, X(4, 5), by - 2, 5, 4)
       R(g, C.paper, X(5, 3), by - 1, 3, 2)
-    } else if (pose === 'cheer') R(g, S, X(1, 2), by - hh - 2, 2, hh + 3)
+    } else if (pose === 'cheer') armUp(1)
     else if (tool) {
       R(g, S, X(2, 5), by + 1, 5, 1)
       tool(T, t)

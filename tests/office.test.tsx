@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MS, skyKey, transitionsOf } from '../hooks/scene'
+import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -456,17 +456,56 @@ test("the main agent's cloud is as big as what it has to say", () => {
 })
 
 
-test('at a compaction a robot gets up, hops and sheds bolts, and so does the main agent', () => {
+test('a robot hops for as long as its compaction runs, and its bolts lie in a pile for a while after', () => {
+  // nothing to show without a compaction
+  expect(shedSpan({}, 0)).toBeNull()
+  // one still running keeps the robot hopping, however long it takes
+  const running = shedSpan({ compactingAt: 1000 }, 61_000)!
+  expect(running.from).toBe(1000)
+  expect(running.until).toBeGreaterThan(61_000)
+  // and one that never reports its end is not shown for ever
+  expect(shedSpan({ compactingAt: 1000 }, 1000 + SHED_MAX_MS + PILE_MS + 1000)).toBeNull()
+  // one over in a moment is still on show long enough to be seen
+  const quick = shedSpan({ compactingAt: 1000, compactedAt: 1005 }, 1010)!
+  expect(quick.until - quick.from).toBeGreaterThanOrEqual(SHED_MIN_MS)
+  // a long one ends on a whole hop soon after it is over
+  const long = shedSpan({ compactingAt: 1000, compactedAt: 41_300 }, 41_310)!
+  expect(long.until).toBeGreaterThanOrEqual(41_300)
+  expect(long.until - 41_300).toBeLessThan(1000)
+  // the pile lies there a while after the robot has sat down, and then it is gone
+  expect(long.gone - long.until).toBe(PILE_MS)
+  expect(shedSpan({ compactingAt: 1000, compactedAt: 41_300 }, long.gone - 1)).not.toBeNull()
+  expect(shedSpan({ compactingAt: 1000, compactedAt: 41_300 }, long.gone)).toBeNull()
+  // a compaction that began after the last one ended is running again
+  expect(shedSpan({ compactingAt: 50_000, compactedAt: 41_300 }, 80_000)!.until).toBeGreaterThan(80_000)
+})
+
+test('at a compaction a robot gets up, hops and sheds bolts with no cloud over it, and so does the main agent', () => {
   const main: Robot = { id: 'main', type: 'main', description: 'Main', status: 'working', spawnedAt: -99_999, seat: -1, activity: { kind: 'write', label: 'a.ts', since: 0 }, calls: 0, errors: 0 }
   const sitter = helper('a1', 2, -60_000)
   const scene = (robots: Robot[], now: number) => buildScene({ home: 'Office', floors: 1, robots, steps: {} }, now)
   const shed = 'data-what="shed"'
+  const hops = (svg: string) => (svg.split(shed)[1] ?? '').includes('animateTransform')
   expect(scene([main, sitter], 0)).not.toContain(shed)
-  expect(scene([main, { ...sitter, compactedAt: 0 }], 100)).toContain(shed)
-  expect(scene([{ ...main, compactedAt: 0 }, sitter], 100)).toContain(shed)
-  // once the bolts are swept up it sits as before
-  expect(scene([main, { ...sitter, compactedAt: 0 }], SHED_MS + 100)).not.toContain(shed)
-  expect(scene([{ ...main, compactedAt: 0 }, sitter], SHED_MS + 100)).not.toContain(shed)
+  // while it runs, a minute in as much as at the start, the robot is up and hopping
+  for (const now of [100, 60_000]) {
+    expect(hops(scene([main, { ...sitter, compactingAt: 0 }], now))).toBe(true)
+    expect(hops(scene([{ ...main, compactingAt: 0 }, sitter], now))).toBe(true)
+  }
+  // the main agent's cloud is put away until it sits down again
+  const putAway = /<g display="none"><set [^>]*\/><g data-what="main-says">/
+  expect(scene([main, sitter], 100)).toContain('data-what="main-says"')
+  expect(putAway.test(scene([main, sitter], 100))).toBe(false)
+  expect(putAway.test(scene([{ ...main, compactingAt: 0 }, sitter], 100))).toBe(true)
+  // over: it sits again, and only the pile is left
+  const after = SHED_MIN_MS + 500
+  expect(scene([main, { ...sitter, compactingAt: 0, compactedAt: 900 }], after)).toContain(shed)
+  expect(hops(scene([main, { ...sitter, compactingAt: 0, compactedAt: 900 }], after))).toBe(false)
+  expect(hops(scene([{ ...main, compactingAt: 0, compactedAt: 900 }, sitter], after))).toBe(false)
+  // once the pile is cleared the room is as it was
+  const cleared = SHED_MIN_MS + PILE_MS + 100
+  expect(scene([main, { ...sitter, compactingAt: 0, compactedAt: 900 }], cleared)).not.toContain(shed)
+  expect(scene([{ ...main, compactingAt: 0, compactedAt: 900 }, sitter], cleared)).not.toContain(shed)
 })
 
 test('a click layer the app gave up on is left out, then laid afresh under a new name', () => {
@@ -506,18 +545,28 @@ test('a click on the open card closes it, however it was opened', async ($, on) 
   await ui.unmount()
 })
 
-test("when Claude compacts an agent's context, its robot is told to shed its bolts", async ($, on) => {
+test("while Claude compacts an agent's context its card says so, and afterwards it is as light as its context", async ($, on) => {
   engine(on)
   const kept = [{ role: 'user', text: 'Summary of the work so far', toolUses: [] }]
-  on('session.compact', () => ({ messages: kept, tokensBefore: 180_000, tokensAfter: 20_000 }) as never)
+  // the card as it reads in the middle of the compaction
+  let during: unknown
+  let look: () => Promise<unknown> = async () => undefined
+  on('session.compact', async () => {
+    during = await look()
+    return { messages: kept, tokensBefore: 180_000, tokensAfter: 20_000 } as never
+  })
   await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  look = () => ui.find({ type: 'Text', text: /compacting its context/i })
   expect(await ui.find({ type: 'Text', text: /context/ })).toBeUndefined()
   await $.session.compact({ trigger: 'manual', messages: kept } as unknown as Parameters<typeof $.session.compact>[0])
-  // it sits down as light as its context now is
+  expect(during).toBeDefined()
+  // no message is left behind, and it sits down as light as its context now is
+  expect(await ui.find({ type: 'Text', text: /compacting/i })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^20k context$/i })).toBeDefined()
   // one worked out ahead of time changes nothing
   await $.session.compact({ trigger: 'precompute', messages: kept } as unknown as Parameters<typeof $.session.compact>[0])
+  expect(await ui.find({ type: 'Text', text: /compacting/i })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^20k context$/i })).toBeDefined()
   await ui.unmount()
 })

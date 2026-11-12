@@ -5,7 +5,7 @@ import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'cl
 
 import type { Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MS, skyKey, transitionsOf, W } from './scene'
+import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, skyKey, transitionsOf, W } from './scene'
 import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
@@ -268,6 +268,13 @@ function shown(d: Display, now: number): Robot[] {
     return p !== null && (p.goneAt === null || p.goneAt > now)
   })
 }
+/** A compaction as the picture shows it: 1 while the robot hops, 2 while only its pile of bolts is left, else 0. */
+const shedPhase = (r: Robot, now: number) => {
+  const shed = shedSpan(r, now)
+  return !shed ? 0 : shed.until > now ? 1 : 2
+}
+/** Whether a compaction of this robot's context is running. */
+const isCompacting = (r: Robot, now: number) => r.compactingAt !== undefined && r.compactedAt === undefined && now - r.compactingAt < SHED_MAX_MS
 const visualKey = (d: Display, now: number) =>
   JSON.stringify([
     d.home,
@@ -277,7 +284,7 @@ const visualKey = (d: Display, now: number) =>
     chartRows(dailyTotals(d.tokens, d.history, now, CHART_DAYS)),
     // the window follows the hour of the picture's own moment
     skyKey(d.at),
-    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactedAt ?? 0, r.compactedAt !== undefined && now - r.compactedAt < SHED_MS]),
+    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now)]),
   ])
 const structureKey = (d: Display, now: number) =>
   JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt])])
@@ -423,6 +430,7 @@ const ACTIVITY_WORD: Record<ActivityKind, string> = {
 const stateWord = (r: Robot) => {
   if (r.status === 'done') return 'finished'
   if (r.status === 'failed') return 'stopped early'
+  if (isCompacting(r, Date.now())) return 'compacting its context'
   if (r.seat >= CAPACITY && r.type !== 'main') return 'waiting for a desk'
   const label = r.activity.label ? ` ${clip(r.activity.label, 28)}` : ''
   return `${ACTIVITY_WORD[r.activity.kind]}${label}`
@@ -447,7 +455,9 @@ function progressOf(r: Robot, steps: Step[]): { bar: Progress; label: string } {
   const resting = r.type === 'main' && r.status === 'idle'
   const state = r.status === 'done' || resting ? 'done' : r.status === 'failed' ? 'failed' : 'running'
   const count = `${taken.length} ${taken.length === 1 ? 'step' : 'steps'}`
-  const label = resting
+  const label = isCompacting(r, Date.now())
+    ? 'Compacting its context'
+    : resting
     ? taken.length
       ? `Resting · last turn took ${count}`
       : 'Resting'
@@ -465,6 +475,7 @@ function progressOf(r: Robot, steps: Step[]): { bar: Progress; label: string } {
 function taskState(r: Robot): TaskState {
   if (r.status === 'done') return 'done'
   if (r.status === 'failed') return 'failed'
+  if (isCompacting(r, Date.now())) return 'running'
   if (r.type === 'main' && r.status === 'idle') return 'idle'
   return r.activity.kind === 'ask' ? 'waiting' : 'running'
 }
@@ -630,6 +641,8 @@ export const register: Register = (on) => {
                   exitAt: undefined,
                   plan: id === 'main' ? undefined : r.plan,
                   turnStartedAt: now,
+                  // a new turn means its compaction is over, reported or not
+                  compactedAt: r.compactingAt !== undefined && r.compactedAt === undefined ? now : r.compactedAt,
                   activity: r.activity.kind === 'idle' || r.activity.kind === 'done' ? { kind: 'think', label: '', since: now } : r.activity,
                 }
               : r,
@@ -681,42 +694,40 @@ export const register: Register = (on) => {
     return res
   })
 
-  // A compaction: while it runs, the robot's cloud says so; once it is done, the robot gets up,
-  // hops and sheds bolts, and sits down as light as its context now is.
+  // A compaction: for as long as it runs the robot is up from its seat, hopping and shedding bolts
+  // into a small pile; when it is over the robot sits down as light as its context now is.
   on('session.compact', async ($, e, next) => {
     const id = e.agentId ?? 'main'
     // one worked out ahead of time changes nothing yet
     const real = e.trigger !== 'precompute'
-    // a compaction of a transcript that has no robot (one of the engine's own forks) prints none
+    // a compaction of a transcript that has no robot (one of the engine's own forks) shows nothing
     const mark = (w: World, fn: (r: Robot) => Robot): World => (w.robots.some((r) => r.id === id) ? { ...w, robots: w.robots.map((r) => (r.id === id ? fn(r) : r)) } : w)
-    let before: Activity | undefined
+    const began = Date.now()
     if (real) {
       try {
-        const now = Date.now()
-        await update($, world, (w) =>
-          mark(id === 'main' ? ensure(w, id, now) : w, (r) => {
-            before = r.activity
-            return { ...r, activity: { kind: 'think', label: 'COMPACTING', since: now } }
-          }),
-        )
+        await update($, world, (w) => mark(id === 'main' ? ensure(w, id, began) : w, (r) => ({ ...r, compactingAt: began, compactedAt: undefined, compactedFrom: r.context })))
+        await publish($, true)
       } catch {}
     }
-    const res = await next(e)
-    if (real) {
+    // however it ends, the robot sits down again; only a compaction that stood makes it lighter
+    const settle = async (lighter: number | undefined, stood: boolean) => {
+      if (!real) return
       try {
         const now = Date.now()
-        const done = !('skip' in res)
-        const lighter = 'tokensAfter' in res ? res.tokensAfter : undefined
         await update($, world, (w) =>
-          mark(w, (r) => ({
-            ...r,
-            activity: r.activity.label === 'COMPACTING' && before ? { ...before, since: now } : r.activity,
-            ...(done ? { compactedAt: now, compactedFrom: r.context, context: lighter ?? r.context } : {}),
-          })),
+          mark(w, (r) => (r.compactingAt !== began ? r : { ...r, compactedAt: r.compactedAt ?? now, ...(stood ? { context: lighter ?? r.context } : { compactedFrom: r.context }) })),
         )
         await publish($, true)
       } catch {}
     }
+    let res: Awaited<ReturnType<typeof next>>
+    try {
+      res = await next(e)
+    } catch (err) {
+      await settle(undefined, false)
+      throw err
+    }
+    await settle('tokensAfter' in res ? res.tokensAfter : undefined, !('skip' in res))
     return res
   })
 

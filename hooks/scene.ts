@@ -1121,8 +1121,31 @@ const HATCH_LEAD_MS = 250
 const HATCH_HOLD_MS = 350
 /** How long the joint weeps after a splash. */
 export const LEAK_MS = 3600
-/** How long a compaction's hop lasts, bolts and all. */
-export const SHED_MS = 1700
+/* ---------- a compaction ---------- */
+/** One hop: a breath on the floor, up, down, and a breath again. */
+export const HOP_CYCLE_MS = 800
+/** A compaction is on show at least this long, however fast it went. */
+export const SHED_MIN_MS = 4 * HOP_CYCLE_MS
+/** One that never reports its end stops being shown after this. */
+export const SHED_MAX_MS = 5 * 60_000
+/** The bolts lie in their pile this long after the robot has sat back down. */
+export const PILE_MS = 6000
+/** A compaction as the picture shows it: the robot hops from `from` until `until`, and its pile is cleared by `gone`. */
+export type Shed = { from: number; until: number; gone: number }
+/**
+ * When a robot is up and hopping for a compaction, and when its pile of bolts is cleared away;
+ * null when there is nothing left of it to show. It hops for as long as the compaction runs.
+ */
+export function shedSpan(r: { compactingAt?: number; compactedAt?: number }, now: number): Shed | null {
+  const from = r.compactingAt
+  if (from === undefined) return null
+  const over = r.compactedAt !== undefined && r.compactedAt >= from ? r.compactedAt : null
+  const length = over === null ? SHED_MAX_MS : Math.min(Math.max(over - from, SHED_MIN_MS), SHED_MAX_MS)
+  // it lands before it sits: the show ends on a whole hop
+  const until = from + Math.ceil(length / HOP_CYCLE_MS) * HOP_CYCLE_MS
+  const gone = until + PILE_MS
+  return gone > now ? { from, until, gone } : null
+}
 // The recycling pipe: a riser under the printer, a rounded elbow, and a run to the vat.
 const PIPE_X = 18 // the riser's left outline
 const PIPE_Y = 153 // the run's top outline
@@ -2272,36 +2295,74 @@ function leakSvg(detail: Detail): string {
   return `<g data-what="leak">${at(JOINT_X - 2, y0, drip)}</g>`
 }
 
+/* The bolts of a pile in the order they land: where each lies in the pile's own box, and which kind it is. */
+const PILE: Array<[x: number, y: number, kind: 'steel' | 'brass' | 'nut']> = [
+  [3, 4, 'steel'], [0, 5, 'brass'], [5, 4, 'steel'], [7, 4, 'steel'], [1, 3, 'steel'], [4, 3, 'brass'], [7, 2, 'steel'], [4, 1, 'steel'], [9, 5, 'nut'],
+]
+const PILE_W = 10
+/* When in a hop each of its two bolts leaves the robot, as a share of the hop. */
+const FLIGHTS = [0.3, 0.45]
+function boltSvg(kind: 'steel' | 'brass' | 'nut'): string {
+  const g = new Px(3, 2)
+  if (kind === 'steel') {
+    R(g, C.steel, 0, 0, 2, 2)
+    R(g, C.steelL, 0, 0, 1, 1)
+    R(g, C.steelD, 1, 1, 1, 1)
+  } else if (kind === 'brass') {
+    R(g, C.amber, 0, 0, 2, 1)
+    R(g, C.steelL, 2, 0, 1, 1)
+  } else R(g, C.steelL, 0, 0, 1, 1)
+  return g.svg()
+}
+
 /**
- * A compaction: the robot gets up, hops twice and sheds bolts, the context it no longer carries.
- * It stands at `x` on the floor `fy`; the bolts lie where they fell until the time is up.
+ * A compaction: the robot is up from its seat and hops for as long as it runs, and with every hop
+ * two bolts fly out of it, the context it no longer carries, into a small pile at its side. The
+ * pile lies there a while after it has sat down, then is cleared bolt by bolt.
+ * It stands at `x` on the floor `fy`, on its feet from `up` to `down`; the pile's left edge is `pile`.
  */
-function shedSvg(role: string, small: boolean, girth: number, x: number, fy: number, t0: number, sec: (t: number) => number, detail: Detail): string {
-  const body = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small, pose: 'cheer', eyes: 'happy', girth }))
-  // every move ends where it rests, so a picture drawn part-way through shows it there
-  const a = `${x - 13} ${fy - 32}`
-  const up = `${x - 13} ${fy - 39}`
-  const hops = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${a};${up};${a};${up};${a}" keyTimes="0;0.25;0.5;0.75;1" calcMode="spline" keySplines="0 0 0.58 1;0.42 0 1 1;0 0 0.58 1;0.42 0 1 1" begin="${s2(sec(t0 + 150))}s" dur="0.9s" fill="freeze"/>${body}</g>`
-  const steel = new Px(2, 2)
-  R(steel, C.steel, 0, 0, 2, 2)
-  R(steel, C.steelL, 0, 0, 1, 1)
-  const brass = new Px(3, 1)
-  R(brass, C.amber, 0, 0, 2, 1)
-  R(brass, C.steelL, 2, 0, 1, 1)
-  let bolts = ''
-  for (let i = 0; i < 8; i++) {
-    const side = i % 2 ? 1 : -1
-    const reach = 5 + ((i * 5) % 11)
-    const from = `${x + side * 2} ${fy - 9}`
-    const peak = `${x + side * (reach >> 1)} ${fy - 17 - (i % 3) * 2}`
-    const land = `${x + side * reach} ${fy - 2}`
-    const skip = `${x + side * (reach + 2)} ${fy - 4}`
-    const rest = `${x + side * (reach + 3)} ${fy - 2}`
-    const tb = t0 + 250 + i * 110
-    const fly = `<g transform="translate(${rest})"><animateTransform attributeName="transform" type="translate" values="${from};${peak};${land};${skip};${rest}" keyTimes="0;0.3;0.7;0.85;1" begin="${s2(sec(tb))}s" dur="0.6s" fill="freeze"/>${(i % 3 ? steel : brass).svg()}</g>`
-    bolts += during(sec(tb), null, fly)
+function shedSvg(role: string, small: boolean, girth: number, x: number, fy: number, pile: number, shed: Shed, up: number, down: number, sec: (t: number) => number): string {
+  // every loop counts from the compaction's start, so a picture drawn part-way through is in step
+  const loop = (offset: number) => `dur="${s2(HOP_CYCLE_MS / 1000)}s" begin="${s2(sec(shed.from + offset))}s" repeatCount="indefinite"`
+  let out = ''
+  if (down > up) {
+    const frame = (pose: Pose, eyes: Eyes) => {
+      const g = new Px(26, 34)
+      bot(g, 13, 32, { role, small, pose, eyes, girth })
+      return g.svg()
+    }
+    const a = `${x - 13} ${fy - 32}`
+    const top = `${x - 13} ${fy - 39}`
+    const body =
+      `<g><animate attributeName="visibility" values="visible;hidden;visible" keyTimes="0;0.25;0.75" calcMode="discrete" ${loop(0)}/>${frame('stand', 'open')}</g>` +
+      `<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.25;0.75" calcMode="discrete" ${loop(0)}/>${frame('cheer', 'happy')}</g>`
+    const hopper = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${a};${a};${top};${a};${a}" keyTimes="0;0.25;0.5;0.75;1" calcMode="spline" keySplines="0 0 1 1;0 0 0.58 1;0.42 0 1 1;0 0 1 1" ${loop(0)}/>${body}</g>`
+    // a bolt is in the air for half a hop, then out of sight until its turn comes round again
+    let flights = ''
+    for (const [k, leaves] of FLIGHTS.entries()) {
+      const x0 = x - 5
+      const y0 = fy - 13
+      const x1 = pile + 3 + k * 3
+      const y1 = fy - 6
+      const pts: string[] = []
+      for (let i = 0; i <= 4; i++) {
+        const u = i / 4
+        pts.push(`${Math.round(x0 + (x1 - x0) * u)} ${Math.round(y0 + (y1 - y0) * u - 4 * (7 + k * 4) * u * (1 - u))}`)
+      }
+      const when = loop(leaves * HOP_CYCLE_MS)
+      flights +=
+        `<g visibility="hidden" transform="translate(${pts[4]})"><animate attributeName="visibility" values="visible;hidden" keyTimes="0;0.5" calcMode="discrete" ${when}/>` +
+        `<animateTransform attributeName="transform" type="translate" values="${pts.join(';')};${pts[4]}" keyTimes="0;0.125;0.25;0.375;0.5;1" ${when}/>${boltSvg(k ? 'brass' : 'steel')}</g>`
+    }
+    out += during(sec(up), sec(down), flights + hopper)
   }
-  return `<g data-what="shed">${during(sec(t0), sec(t0 + SHED_MS), hops + bolts)}</g>`
+  // the pile grows by the bolts that have landed, and is cleared from the top once its time is up
+  PILE.forEach(([px, py, kind], i) => {
+    const hop = Math.min(i >> 1, SHED_MIN_MS / HOP_CYCLE_MS - 1)
+    const lands = shed.from + (hop + FLIGHTS[i & 1]! + 0.5) * HOP_CYCLE_MS
+    out += during(sec(lands), sec(shed.gone - i * 150), at(pile + px, fy - 6 + py, boltSvg(kind)))
+  })
+  return `<g data-what="shed">${out}</g>`
 }
 
 function compose(world: World, now: number, selected: string, detail: Detail): string {
@@ -2430,13 +2491,19 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     const desk = props + at(p.seat.monX, p.seat.monY, screenOn)
     const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) + mark + cloudOf(workKind, r.status === 'working' ? r.activity.label : '')
     const until = p.workEnd === null ? null : sec(p.workEnd)
-    // a compaction at its desk: it gets up, hops and sheds bolts, then sits down again
-    const c = r.compactedAt
-    const shedAt = c !== undefined && c >= p.arriveAt && c + SHED_MS > now && (p.workEnd === null || c + SHED_MS <= p.workEnd) ? c : null
-    if (shedAt === null) out += during(sec(p.arriveAt), until, desk + sitter)
+    // a compaction at its desk: it is up and hopping, shedding bolts, for as long as it runs, then sits down again
+    const shed = shedSpan(r, now)
+    const up = shed ? Math.max(shed.from, p.arriveAt) : 0
+    const down = shed ? (p.workEnd === null ? shed.until : Math.min(shed.until, p.workEnd)) : 0
+    if (!shed) out += during(sec(p.arriveAt), until, desk + sitter)
     else {
-      out += during(sec(p.arriveAt), until, desk) + during(sec(p.arriveAt), sec(shedAt), sitter) + during(sec(shedAt + SHED_MS), until, sitter)
-      out += shedSvg(role, true, girthOf(r.compactedFrom ?? r.context), p.seat.x, p.seat.floorY, shedAt, sec, detail)
+      out += during(sec(p.arriveAt), until, desk)
+      if (down <= up) out += during(sec(p.arriveAt), until, sitter)
+      else out += (up > p.arriveAt ? during(sec(p.arriveAt), sec(up), sitter) : '') + (p.workEnd === null || down < p.workEnd ? during(sec(down), until, sitter) : '')
+      // the pile lies at its feet, clear of the hatch in the floor
+      const beside = p.seat.x - 15
+      const pile = p.seat.floor === 0 && beside < HOLE_X0 + HOLE_W + 2 && beside + PILE_W > HOLE_X0 - 2 ? HOLE_X0 + HOLE_W + 2 : beside
+      out += shedSvg(role, true, girthOf(r.compactedFrom ?? r.context), p.seat.x, p.seat.floorY, pile, shed, up, down, sec)
     }
     if (p.workEnd !== null && p.leaveAt !== null && p.handAt !== null && p.toHoleAt !== null && p.jumpAt !== null && p.splashAt !== null && p.goneAt !== null) {
       const endKind: ActivityKind = r.status === 'failed' ? 'error' : 'done'
@@ -2506,30 +2573,36 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const p = phaseOf(r, floors)
       return !!p && (p.goneAt === null || p.goneAt > now)
     })
-    const shedAt = main.compactedAt !== undefined && main.compactedAt + SHED_MS > now ? main.compactedAt : null
-    const asleep = kind === 'idle' && !helpers && shedAt === null
+    // a compaction: the main agent is up from its chair, hopping and shedding bolts like anyone else, for as long as it runs
+    const shed = shedSpan(main, now)
+    const hopping = shed !== null && shed.until > now
+    const asleep = kind === 'idle' && !helpers
     const look = lookFor(kind === 'idle' && helpers ? 'think' : kind, true)
     // with nothing to type, the boss has its stick in its hand; otherwise the stick leans on the chair
     const inHand = look.pose === 'sit' && !asleep
-    if (!inHand) {
-      const stick = new Px(4, 13)
-      for (let i = 0; i < 13; i++) R(stick, C.woodL, i >> 2, 12 - i, 1, 1)
-      out += at(MAIN_X - 14, gy + FY - 13, stick.svg())
-    }
+    const stick = new Px(4, 13)
+    for (let i = 0; i < 13; i++) R(stick, C.woodL, i >> 2, 12 - i, 1, 1)
+    const leaning = at(MAIN_X - 14, gy + FY - 13, stick.svg())
+    if (!inHand) out += leaning
+    else if (hopping) out += during(null, sec(shed.until), leaning)
     const seatedMain = at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand))
-    // a compaction: the main agent gets up from its chair, hops and sheds bolts like anyone else
-    if (shedAt === null) out += seatedMain
-    else out += during(null, sec(shedAt), seatedMain) + during(sec(shedAt + SHED_MS), null, seatedMain) + shedSvg('main', false, girthOf(main.compactedFrom ?? main.context), MAIN_X, gy + FY, shedAt, sec, detail)
-    if (main.id === selected) out += selectMark(MAIN_X, gy + SEAT_Y - 24)
+    // what goes with the main agent in its chair: its cloud, or its sleep
+    let seatedWith = ''
     if (kind === 'idle' && helpers) {
       const busy = subs.filter((r) => r.status === 'working').length
-      out += bubbleSvg('break', busy ? `${busy} AT WORK` : 'REPORTS DUE', false, 58, gy + 51, MAIN_X, gy + SEAT_Y - 21, detail)
+      seatedWith = bubbleSvg('break', busy ? `${busy} AT WORK` : 'REPORTS DUE', false, 58, gy + 51, MAIN_X, gy + SEAT_Y - 21, detail)
     } else if (asleep) {
-      out += sprite(W, height, [0, 0.7, 1.4, 2.1], [0.7, 0.7, 0.7, 0.7], detail, (g, t) => zzz(g, MAIN_X + 2, gy + SEAT_Y - 22, t))
-      out += `<rect width="${W}" height="${height}" fill="#0a061e" opacity="0.32"/>`
+      seatedWith = sprite(W, height, [0, 0.7, 1.4, 2.1], [0.7, 0.7, 0.7, 0.7], detail, (g, t) => zzz(g, MAIN_X + 2, gy + SEAT_Y - 22, t))
+      seatedWith += `<rect width="${W}" height="${height}" fill="#0a061e" opacity="0.32"/>`
     } else {
-      out += bubbleSvg(kind, main.activity.label, false, 58, gy + 51, MAIN_X, gy + SEAT_Y - 21, detail)
+      seatedWith = bubbleSvg(kind, main.activity.label, false, 58, gy + 51, MAIN_X, gy + SEAT_Y - 21, detail)
     }
+    out += hopping ? during(sec(shed.until), null, seatedMain) : seatedMain
+    if (shed) out += shedSvg('main', false, girthOf(main.compactedFrom ?? main.context), MAIN_X, gy + FY, MAIN_X - 27, shed, shed.from, shed.until, sec)
+    if (main.id === selected) out += selectMark(MAIN_X, gy + SEAT_Y - 24)
+    // nothing is said over a robot that is hopping
+    const says = `<g data-what="main-says">${seatedWith}</g>`
+    out += hopping ? during(sec(shed.until), null, says) : says
   }
   const roof = cached('roof', () => paintRoof().svg())
   const beacon = `<rect x="205" y="0" width="3" height="1" fill="${C.red}"><animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite"/></rect>`

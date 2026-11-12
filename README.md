@@ -10,7 +10,7 @@
 </p>
 
 <p align="center"><sub>
-  A designer is printed and briefed. The tester's context is compacted: it hops and sheds its bolts.<br>
+  A designer is printed and briefed. The tester's context is compacted: it hops, shedding bolts into a small pile.<br>
   The writer hands in its report and takes the hatch; the metal comes back out of the printer as an architect.
 </sub></p>
 
@@ -22,7 +22,7 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
 - **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a ladle of molten metal in the dark cellar. Daylight follows it down, the splash leaves the pipe's joint weeping for a moment, and the pipe takes the metal back to the printer, where it becomes the next robot.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
-- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. When Claude compacts it, the robot gets up, hops and sheds a few bolts, then sits down slimmer. The main agent does the same.
+- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same.
 - **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. While its helpers work, an idle main agent takes a coffee break; in an empty office it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
 
 <p align="center">

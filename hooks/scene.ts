@@ -11,6 +11,13 @@ const SEAT_Y = FY - 6
 const MAIN_X = 110
 const FEED_MS = 1500
 const PRINT_MS = 2400
+// with robots waiting for it, the printer works at the double
+const RUSH_FEED_MS = 700
+const RUSH_PRINT_MS = 1000
+// the plate is free once the printed robot has stepped off it
+const PLATE_CLEAR_MS = 350
+// one robot at a time at the main desk: the handover, the hatch and the hop
+const REPORT_SLOT_MS = 1600
 const WALK_PX_PER_S = 90
 const LIFT_PX_PER_S = 120
 const MIN_WORK_MS = 2500
@@ -213,9 +220,14 @@ function tx(g: Px, s: string, x: number, y: number, c: string) {
   return x
 }
 export const fit = (s: string, max: number) => {
-  s = s.toUpperCase().replace(/[^A-Z0-9.,:/\-_'"()?!<>=+*$% ]/g, ' ')
-  while (tw(s) > max && s.length > 1) s = s.slice(0, -1)
-  return s
+  s = s.toUpperCase().replace(/[^A-Z0-9.,:/\-_'"()?!<>=+*$% ]/g, ' ').replace(/ +/g, ' ').trim()
+  if (tw(s) <= max) return s
+  // cut to fit with two dots after it, on a whole word where that loses little
+  let cut = s
+  while (cut.length > 1 && tw(cut + '..') > max) cut = cut.slice(0, -1)
+  const space = cut.lastIndexOf(' ')
+  if (space >= cut.length * 0.6) cut = cut.slice(0, space)
+  return cut.replace(/[ .,:/\-_]+$/, '') + '..'
 }
 
 /* ---------- the robot ---------- */
@@ -617,15 +629,11 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
     R(g, C.amber, x + 4, y + 1, 1, 1)
     const ab = sm ? y + 4 : y + 5
     R(g, C.steelL, x + 2, ab, w - 4, sm ? 2 : 7)
-    const full = fit(label, w - 8)
-    if (!sm) {
-      const s = full.slice(0, Math.floor(a * 10))
-      tx(g, s, x + 3, ab + 1, C.ink)
-      if (s.length < full.length) R(g, C.ink, x + 4 + tw(s), ab + 1, 1, 5)
-    }
+    if (!sm) tx(g, fit(label, w - 8), x + 3, ab + 1, C.ink)
     const rtop = sm ? y + 8 : y + 14
     const n = sm ? 2 : 3
-    const shown = sm ? 2 : clamp((a - full.length / 10) * 2, 0, 3)
+    // the page loads a line at a time
+    const shown = sm ? 2 : 1 + (Math.floor(a * 2.2) % 3)
     for (let i = 0; i < n && i < shown; i++) {
       R(g, C.blue, x + 3, rtop + i * (sm ? 3 : 5), Math.round(w * 0.45), 1)
       R(g, C.steel, x + 3, rtop + 1 + i * (sm ? 3 : 5), w - 9 - ((i * 7) % 10), 1)
@@ -639,11 +647,15 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
   },
   read(g, x, y, w, h, a, label, sm) {
     if (sm) {
-      R(g, C.ink, x + 2, y, 13, h)
-      R(g, C.paper, x + 3, y + 1, 11, h - 2)
-      for (let i = 0; i < 3; i++) R(g, C.steelD, x + 4, y + 3 + i * 3, 9, 1)
-      R(g, C.blue, x + 20, y + 2, 14, h - 5)
-      R(g, C.paper, x + 22, y + 4, 10, h - 9)
+      // an open book
+      R(g, C.blueD, x + 2, y, 22, h)
+      R(g, C.paper, x + 3, y + 1, 9, h - 2)
+      R(g, C.paper, x + 14, y + 1, 9, h - 2)
+      const sc = Math.floor(a * 3)
+      for (let i = 0; i < 3; i++) {
+        R(g, C.steelD, x + 4, y + 3 + i * 3, 7 - ((i + sc) % 3), 1)
+        R(g, C.steelD, x + 15, y + 3 + i * 3, 7 - ((i + sc + 1) % 3), 1)
+      }
       return
     }
     tx(g, fit(label, w - 2), x, y, C.blueD)
@@ -674,7 +686,8 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
   ask(g, x, y, w, h, a, label, sm) {
     const b = Math.floor(a * 3) % 2
     if (sm) {
-      tx(g, '?', x + 16, y + 4 - b, C.coralD)
+      R(g, C.amber, x, y, w, h)
+      tx(g, '?', x + (w >> 1) - 1, y + 4 - b, C.ink)
       return
     }
     const q = [[0, 1, 1, 0], [1, 0, 0, 1], [0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 1, 0]]
@@ -694,8 +707,13 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
     R(g, C.paper, x + 9, y + 13, 6, 7)
     R(g, C.blueD, x + 10, y + 14, 4, 5)
     R(g, C.paper, x + 11, y + 1, 2, 3)
-    tx(g, 'PRINT', x + 24, y + 4, C.paper)
-    tx(g, fit(label, w - 26), x + 24, y + 13, C.tealL)
+    // "Designer: palette check" names the helper, then its task
+    const colon = label.indexOf(':')
+    const who = colon > 0 ? label.slice(0, colon) : 'PRINT'
+    const what = colon > 0 ? label.slice(colon + 1) : label
+    R(g, C.blueD, x + 22, y + 2, w - 23, 19)
+    tx(g, fit(who, w - 26), x + 24, y + 4, C.paper)
+    tx(g, fit(what, w - 26), x + 24, y + 13, C.tealL)
   },
   talk(g, x, y, w, h, a, label, sm) {
     const n = 1 + (Math.floor(a * 3) % 3)
@@ -703,17 +721,38 @@ const BUB: Partial<Record<ActivityKind | 'blue', Bub>> = {
     if (!sm) tx(g, fit(label, w - 4), x + 2, y, C.violetD)
   },
   done(g, x, y, w, h, a, label, sm) {
-    check(g, sm ? x + 15 : x + 6, sm ? y + 2 : y + 8, C.greenD)
+    check(g, sm ? x + ((w - 12) >> 1) : x + 6, sm ? y + 1 : y + 8, C.greenD)
     if (!sm) tx(g, fit(label, w - 22), x + 21, y + 12, C.ink)
   },
   error(g, x, y, w, h, a, label, sm) {
-    cross(g, sm ? x + 15 : x + 6, sm ? y + 1 : y + 7, C.red)
+    cross(g, sm ? x + ((w - 11) >> 1) : x + 6, sm ? y + 1 : y + 7, C.red)
     if (!sm) tx(g, fit(label, w - 22), x + 21, y + 12, C.redD)
   },
 }
 BUB.mcp = BUB.web
 BUB.spawn = BUB.blue
 BUB.tool = BUB.run
+/** The main agent with nothing to do while its helpers work: a mug of coffee, and how many are at it. */
+const coffeeBreak: Bub = (g, x, y, _w, _h, a, label) => {
+  const mx = x + 5
+  const my = y + 12
+  R(g, C.ink, mx, my, 10, 12)
+  R(g, C.white, mx + 1, my + 1, 8, 10)
+  R(g, '#6b4423', mx + 1, my + 1, 8, 2)
+  R(g, C.steelL, mx + 7, my + 4, 2, 7)
+  R(g, C.ink, mx + 10, my + 3, 3, 1)
+  R(g, C.ink, mx + 12, my + 4, 1, 4)
+  R(g, C.ink, mx + 10, my + 8, 3, 1)
+  // the steam drifts
+  const drift = Math.floor(a * 2.2) % 2
+  for (let i = 0; i < 2; i++) {
+    R(g, C.steel, mx + 2 + i * 4 + drift, my - 3, 1, 2)
+    R(g, C.steel, mx + 3 + i * 4 - drift, my - 6, 1, 2)
+    R(g, C.steelL, mx + 2 + i * 4 + drift, my - 9, 1, 2)
+  }
+  tx(g, 'COFFEE BREAK', x + 22, y + 7, C.ink)
+  tx(g, label, x + 22, y + 16, C.coralD)
+}
 
 /* ---------- furniture ---------- */
 type ScreenMode = 'off' | 'idle' | 'code' | 'term' | 'web' | 'file' | 'blue' | 'pass' | 'fail'
@@ -785,8 +824,8 @@ const LCD = { x: PRINTER.x + 5, y: PLATE_Y + 6, w: 11, h: 3 }
 const SHAFT_X = 245
 export const ROOF_H = 14
 const GROUND_DESKS = [
-  { robot: 58, bubble: { x: 8, y: 48 } },
-  { robot: 196, bubble: { x: 174, y: 51 } },
+  { robot: 58, bubble: { x: 22, y: 48 } },
+  { robot: 196, bubble: { x: 180, y: 54 } },
 ]
 const UPPER_X = [20, 64, 108, 152, 196]
 // The wall: the chat's sign up top, the whiteboard with the token chart on the right, and the
@@ -850,7 +889,7 @@ export function seatFor(seat: number, floors: number): Seat | null {
   if (floor > floors) return null
   const x = UPPER_X[k % PER_FLOOR]!
   const fy = gy - floor * FLOOR_H + 46
-  return { x, y: fy - 6, floorY: fy, floor, monX: x + 10, monY: fy - 17, bubble: { x: Math.max(2, Math.min(W - 46, x - 22)), y: fy - 45 } }
+  return { x, y: fy - 6, floorY: fy, floor, monX: x + 10, monY: fy - 17, bubble: { x: Math.max(2, Math.min(W - 34, x - 16)), y: fy - 43 } }
 }
 
 /**
@@ -1218,12 +1257,15 @@ function employeeFrame(tally: TokenTally | undefined, now: number, detail: Detai
   const best = champion(tally, now)
   const role = roleInfo(best?.role ?? 'main')
   const face = new Px(12, 12)
-  bot(face, 6, 18, { paint: role.paint, small: true, gear: role.headgear, view: 'front', pose: 'stand', eyes: best ? 'happy' : 'open' })
-  // the title, then the employee's tokens and the whole day's
+  if (best) bot(face, 6, 18, { paint: role.paint, small: true, gear: role.headgear, view: 'front', pose: 'stand', eyes: 'happy' })
+  else tx(face, '?', 5, 4, GOLD)
+  // the title, then the employee's tokens and the whole day's; before anyone has earned it, the frame says so
   tx(g, 'EMPLOYEE', 21, 4, GOLD_L)
   tx(g, 'OF THE DAY', 21, 10, GOLD)
-  const end = tx(g, best ? formatTokens(best.tokens) : '0', 21, 16, C.white)
-  tx(g, `OF ${formatTokens(tally?.total ?? 0)}`, end + 3, 16, GOLD)
+  if (best) {
+    const end = tx(g, formatTokens(best.tokens), 21, 16, C.white)
+    tx(g, `OF ${formatTokens(tally?.total ?? 0)}`, end + 3, 16, GOLD)
+  } else tx(g, 'NO ONE YET', 21, 16, C.white)
   // a star that glints on the corner of the frame
   const star = sprite(7, 7, [0, 1.6], [1.6, 0.3], detail, (sg, t) => {
     const bright = t > 0 ? C.white : GOLD_L
@@ -1497,11 +1539,13 @@ function robotFrames(roleId: string, look: BotLook, small: boolean, detail: Deta
   return sprite(26, 34, times, durs, detail, (g, t) => bot(g, 13, 32, { paint, small, gear, pose: look.pose, eyes: look.eyes, t, seated, girth }))
 }
 
-function bubbleSvg(kind: ActivityKind, label: string, sm: boolean, x: number, y: number, tailX: number, tailY: number, detail: Detail): string {
-  const f = BUB[kind]
+const CLOUD_W = 32
+const CLOUD_H = 17
+function bubbleSvg(kind: ActivityKind | 'break', label: string, sm: boolean, x: number, y: number, tailX: number, tailY: number, detail: Detail): string {
+  const f = kind === 'break' ? coffeeBreak : BUB[kind]
   if (!f) return ''
-  const w = sm ? 44 : 80
-  const h = sm ? 19 : 34
+  const w = sm ? CLOUD_W : 80
+  const h = sm ? CLOUD_H : 34
   const shell = new Px(w + 40, h + 40)
   cloud(shell, 1, 1, w, h, tailX - x + 1, tailY - y + 1)
   const times = [0, 0.45, 0.9, 1.35]
@@ -1585,15 +1629,16 @@ export function phaseOf(r: Robot, floors: number): Phase | null {
   if (!seat) return null
   const gy = floors * FLOOR_H
   const groundY = gy + FY
-  const briefPts: Pt[] = [[EXIT_X, groundY], [BRIEF_X, groundY]]
+  // off the plate with a step down to the floor, then across to the main agent
+  const briefPts: Pt[] = [[PRINTER.x + (PRINTER.w >> 1), gy + PLATE_Y], [EXIT_X, groundY], [BRIEF_X, groundY]]
   const briefCum = timings(briefPts)
   const pts: Pt[] =
     seat.floor === 0
       ? [[BRIEF_X, groundY], [seat.x, groundY]]
       : [[BRIEF_X, groundY], [SHAFT_X, groundY], [SHAFT_X, seat.floorY], [seat.x, seat.floorY]]
   const cum = timings(pts)
-  const feedEnd = r.spawnedAt + FEED_MS
-  const printEnd = feedEnd + PRINT_MS
+  const feedEnd = r.spawnedAt + (r.rush ? RUSH_FEED_MS : FEED_MS)
+  const printEnd = feedEnd + (r.rush ? RUSH_PRINT_MS : PRINT_MS)
   const briefAt = printEnd + briefCum[briefCum.length - 1]!
   const briefEnd = briefAt + BRIEF_MS
   const arriveAt = briefEnd + cum[cum.length - 1]!
@@ -1603,7 +1648,7 @@ export function phaseOf(r: Robot, floors: number): Phase | null {
       : [[seat.x, seat.y], [seat.x, seat.floorY], [SHAFT_X, seat.floorY], [SHAFT_X, groundY], [DELIVER_X, groundY]]
   const leaveCum = timings(leavePts)
   // A fast subagent still reaches its desk and works a moment before it reports.
-  const workEnd = r.endedAt === undefined ? null : Math.max(r.endedAt, arriveAt + MIN_WORK_MS)
+  const workEnd = r.endedAt === undefined ? null : Math.max(r.endedAt, arriveAt + MIN_WORK_MS, r.exitAt ?? 0)
   if (workEnd === null)
     return { seat, feedEnd, briefPts, briefCum, briefAt, briefEnd, pts, cum, printEnd, arriveAt, workEnd, leaveAt: null, leavePts, leaveCum, handAt: null, toHoleAt: null, jumpAt: null, splashAt: null, goneAt: null }
   const leaveAt = workEnd + CHEER_MS
@@ -1612,6 +1657,46 @@ export function phaseOf(r: Robot, floors: number): Phase | null {
   const jumpAt = toHoleAt + (Math.abs(HOLE_X - DELIVER_X) / WALK_PX_PER_S) * 1000
   const splashAt = jumpAt + HOP_MS + FALL_MS
   return { seat, feedEnd, briefPts, briefCum, briefAt, briefEnd, pts, cum, printEnd, arriveAt, workEnd, leaveAt, leavePts, leaveCum, handAt, toHoleAt, jumpAt, splashAt, goneAt: splashAt + SPLASH_MS }
+}
+
+/**
+ * When the printer can start on a new robot. It builds one at a time, and the robot before must
+ * have stepped off the plate; a robot that has to wait is printed at the double.
+ */
+export function printSlot(robots: Robot[], floors: number, now: number): { at: number; rush: boolean } {
+  let clear = 0
+  for (const r of robots) {
+    if (r.type === 'main') continue
+    const p = phaseOf(r, floors)
+    if (p) clear = Math.max(clear, p.printEnd + PLATE_CLEAR_MS)
+  }
+  // the plate is clear by the time this robot's metal arrives: start at once
+  if (clear <= now + FEED_MS) return { at: now, rush: false }
+  return { at: clear - RUSH_FEED_MS, rush: true }
+}
+
+/**
+ * The earliest a finished robot may stand up, so that robots finishing together hand in their
+ * reports one at a time; `undefined` when nobody is in its way.
+ */
+export function exitSlot(r: Robot, others: Robot[], floors: number): number | undefined {
+  const p = phaseOf({ ...r, exitAt: undefined }, floors)
+  if (!p || p.handAt === null || p.workEnd === null) return undefined
+  const taken = others
+    .filter((o) => o.id !== r.id && o.type !== 'main')
+    .map((o) => phaseOf(o, floors)?.handAt ?? null)
+    .filter((t): t is number => t !== null)
+    .sort((a, b) => a - b)
+  let hand = p.handAt
+  for (const t of taken) if (Math.abs(hand - t) < REPORT_SLOT_MS) hand = t + REPORT_SLOT_MS
+  return hand === p.handAt ? undefined : p.workEnd + (hand - p.handAt)
+}
+
+/** Whether a finished robot has already left its desk with its report. */
+export function hasStoodUp(r: Robot, floors: number, now: number): boolean {
+  if (r.endedAt === undefined) return false
+  const p = phaseOf(r, floors)
+  return !!p && p.leaveAt !== null && now >= p.leaveAt
 }
 
 /** Every moment a robot's picture changes on its own; once all have passed, a fresh picture holds still. */
@@ -1848,6 +1933,14 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     printerBody(busyBody, true)
     ground += during(null, sec(busyUntil), busyBody.svg() + printerBeacon(true, detail)) + during(sec(busyUntil), null, idle)
   } else ground += idle
+  // robots ordered while the printer is busy: how many wait is counted down on its control box
+  const waiting = subs.filter((r) => phaseOf(r, floors) !== null && r.spawnedAt > now).map((r) => r.spawnedAt).sort((a, b) => a - b)
+  waiting.forEach((t, i) => {
+    const plate = new Px(11, 7)
+    R(plate, C.amber, 0, 0, 11, 7)
+    tx(plate, `+${Math.min(9, waiting.length - i)}`, 2, 1, C.ink)
+    ground += during(i === 0 ? null : sec(waiting[i - 1]!), sec(t), at(PRINTER.x + 18, PLATE_Y + 4, plate.svg()))
+  })
   ground += `<clipPath id="chamber"><rect x="${PRINTER.x + 4}" y="${PRINTER.y + 4}" width="${PRINTER.w - 8}" height="${PLATE_Y - PRINTER.y - 4}"/></clipPath>`
   ground += at(BOARD.x, BOARD.y, tokenChart(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
   ground += employeeFrame(world.tokens, now, detail)
@@ -1882,6 +1975,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
 
   // subagents: printed, walking, working, then cheering and leaving
   const drops: Array<{ open: number; shut: number }> = []
+  const printEnds = printing.map((p) => p.printEnd)
   for (const r of subs) {
     const p = phaseOf(r, floors)
     if (!p || (p.goneAt !== null && p.goneAt <= now)) continue
@@ -1894,7 +1988,9 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const g = new Px(26, 34)
       bot(g, 13, 32, { paint, small: true, gear, pose: 'stand', eyes: 'off', bulb: C.steelD, girth })
       const b = s2(sec(p.feedEnd))
-      const d = s2(PRINT_MS / 1000)
+      const d = s2((p.printEnd - p.feedEnd) / 1000)
+      // the printer builds one robot at a time: this one's turn starts when the one before is done
+      const before = Math.max(0, ...printEnds.filter((t) => t < p.printEnd))
       const reveal = `<clipPath id="${id}"><rect x="${PRINTER.x + 3}" y="${PLATE_Y}" width="${PRINTER.w - 6}" height="0"><animate attributeName="y" from="${PLATE_Y}" to="${PLATE_Y - PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/><animate attributeName="height" from="0" to="${PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/></rect></clipPath>`
       // the gantry comes down to the bed while the metal comes up the pipe, then rises a layer at a time
       const head = sprite(W, GROUND_H, [0, 0.15, 0.3, 0.45], [0.15, 0.15, 0.15, 0.15], detail, (hg, t) =>
@@ -1906,7 +2002,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const gantry = `<g clip-path="url(#chamber)"><g transform="translate(0 ${-PRINT_RISE})">${z}${head}</g></g>`
       // the control box's screen fills as the robot prints
       const bar = `<rect x="${LCD.x}" y="${LCD.y + 1}" width="0" height="1" fill="${C.green}"><animate attributeName="width" from="0" to="${LCD.w}" begin="${b}s" dur="${d}s" fill="freeze"/></rect>`
-      out += at(0, gy, during(null, sec(p.printEnd), `${reveal}<g clip-path="url(#${id})">${at(cx - 13, PLATE_Y - 32, g.svg())}</g>${gantry}${bar}`))
+      out += at(0, gy, during(before ? sec(before) : null, sec(p.printEnd), `${reveal}<g clip-path="url(#${id})">${at(cx - 13, PLATE_Y - 32, g.svg())}</g>${gantry}${bar}`))
     }
     // Riding the lift a robot stands still; a carrying robot keeps its arms full.
     const walker = (pose: Pose, eyes: Eyes, item?: 'report' | 'blueprint') => (face: number, riding: boolean) =>
@@ -1966,7 +2062,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const fromP = `${DELIVER_X - 8} ${groundY - 13}`
       const toP = `${MAIN_X + 4} ${gy + SEAT_Y - 14}`
       const flight = `<g transform="translate(${fromP})"><animateTransform attributeName="transform" type="translate" values="${fromP};${DELIVER_X - 30} ${groundY - 24};${toP}" keyTimes="0;0.5;1" begin="${s2(sec(p.handAt))}s" dur="0.6s" fill="freeze"/>${paper.svg()}</g>`
-      out += during(sec(p.handAt), sec(p.handAt + 650), flight)
+      out += during(sec(p.handAt), sec(p.handAt + 600), flight)
       const thanks = new Px(11, 9)
       R(thanks, C.ink, 0, 0, 11, 9)
       R(thanks, C.paper, 1, 1, 9, 7)
@@ -1989,7 +2085,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const hop = (HOP_MS / (HOP_MS + FALL_MS)).toFixed(3)
       const id = `melt-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
       const fall = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${values}" keyTimes="0;${hop};1" calcMode="spline" keySplines="0 0 0.58 1;0.42 0 1 1" begin="${s2(sec(p.jumpAt))}s" dur="${s2((HOP_MS + FALL_MS) / 1000)}s" fill="freeze"/>${leaping}</g>`
-      out += during(sec(p.jumpAt), sec(p.splashAt + 120), `<clipPath id="${id}"><rect x="0" y="0" width="${W}" height="${gy + MELT_Y}"/></clipPath><g clip-path="url(#${id})">${fall}</g>`)
+      out += during(sec(p.jumpAt), sec(p.splashAt), `<clipPath id="${id}"><rect x="0" y="0" width="${W}" height="${gy + MELT_Y}"/></clipPath><g clip-path="url(#${id})">${fall}</g>`)
       // the splash
       const splash = sprite(30, 14, [0, 0.25, 0.5], [0.25, 0.25, 0.3], detail, (g, t) => {
         const k = Math.round(t / 0.25)
@@ -2007,9 +2103,18 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
   // the main robot and its cloud
   if (main) {
     const kind = main.activity.kind
-    out += at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', lookFor(kind, true), false, detail, true, girthOf(main.context)))
+    // with helpers still about, an idle main agent stays awake and the lights stay on
+    const helpers = subs.some((r) => {
+      const p = phaseOf(r, floors)
+      return !!p && (p.goneAt === null || p.goneAt > now)
+    })
+    const asleep = kind === 'idle' && !helpers
+    out += at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', lookFor(kind === 'idle' && helpers ? 'think' : kind, true), false, detail, true, girthOf(main.context)))
     if (main.id === selected) out += selectMark(MAIN_X, gy + SEAT_Y - 24)
-    if (kind === 'idle') {
+    if (kind === 'idle' && helpers) {
+      const busy = subs.filter((r) => r.status === 'working').length
+      out += bubbleSvg('break', busy ? `${busy} AT WORK` : 'REPORTS DUE', false, 58, gy + 51, MAIN_X, gy + SEAT_Y - 21, detail)
+    } else if (asleep) {
       out += sprite(W, height, [0, 0.7, 1.4, 2.1], [0.7, 0.7, 0.7, 0.7], detail, (g, t) => zzz(g, MAIN_X + 2, gy + SEAT_Y - 22, t))
       out += `<rect width="${W}" height="${height}" fill="#0a061e" opacity="0.32"/>`
     } else {
@@ -2027,6 +2132,31 @@ export function buildScene(world: World, now: number, selected = ''): string {
   if (svg.length > 120_000) svg = compose(world, now, selected, 1)
   if (svg.length > 128_000) svg = compose(world, now, selected, 2)
   return svg
+}
+
+/* ---------- laying a new picture ---------- */
+/**
+ * The app draws the picture as an image, and an image given a new picture shows the old one from
+ * its start until the new one has loaded: for that moment every robot is back where it stood when
+ * the old picture was drawn. So the picture is kept in two layers, and a new one is only ever laid
+ * in the layer that is not on show: over the lower layer, or under the upper one, which comes off
+ * once the picture beneath it has had time to load.
+ */
+export type Layers = { key: string; height: number; lower: string; upper: string; covered: boolean; uncoverAt: number }
+const NO_PICTURE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+export const noLayers: Layers = { key: '', height: 0, lower: '', upper: NO_PICTURE, covered: false, uncoverAt: 0 }
+const UNCOVER_MS = 250
+
+export function layPicture(l: Layers, key: string, svg: string, height: number, now: number, layered: boolean): Layers {
+  // the picture laid underneath has loaded: the upper layer comes off
+  if (l.uncoverAt && now >= l.uncoverAt) l = { ...l, upper: NO_PICTURE, covered: false, uncoverAt: 0 }
+  if (key === l.key) return l
+  // the first picture, a surface that draws one layer, or a building that has grown a floor: laid plainly
+  if (!layered || !l.lower || height !== l.height) return { key, height, lower: svg, upper: NO_PICTURE, covered: false, uncoverAt: 0 }
+  // the lower layer is on show: the new picture goes over it
+  if (!l.covered) return { ...l, key, upper: svg, covered: true, uncoverAt: 0 }
+  // the upper layer is on show: the new picture goes under it, and is uncovered once it has loaded
+  return { ...l, key, lower: svg, uncoverAt: now + UNCOVER_MS }
 }
 
 export type TaskState = 'running' | 'waiting' | 'done' | 'failed' | 'idle'

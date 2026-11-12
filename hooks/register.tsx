@@ -5,14 +5,15 @@ import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'cl
 
 import type { Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, floorsFor, girthOf, hitTest, MAX_FLOORS, phaseOf, progressSvg, roleInfo, roleOf, sceneHeight, skyKey, transitionsOf, W } from './scene'
-import type { Progress, TaskState } from './scene'
+import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, floorsFor, girthOf, hasStoodUp, hitTest, layPicture, MAX_FLOORS, noLayers, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, skyKey, transitionsOf, W } from './scene'
+import type { Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
 const STEPS_KEPT = 60
 // The picture reloads whenever its drawing changes, so changes are held and batched.
 const HOLD_MS = 1800
 const GAP_MS = 1500
+const SWAP_GAP_MS = 350
 const PUBLISH_EVERY_MS = 500
 // the whiteboard's chart re-reads every chat's totals once a minute, and keeps two weeks of them
 const HISTORY_EVERY_MS = 60_000
@@ -23,6 +24,7 @@ const LIST_KEEP_MS = 120_000
 const world = atom({ plugin: 'tin-collar', key: 'world' } as const, { home: '', floors: 0, robots: [], steps: {} }, { shape: 'world-4' })
 const display = atom({ plugin: 'tin-collar', key: 'display' } as const, { at: 0, home: '', floors: 0, robots: [], selected: '' }, { shape: 'display-3' })
 const selected = atom({ plugin: 'tin-collar', key: 'selected' } as const, '')
+const redraw = atom({ plugin: 'tin-collar', key: 'redraw' } as const, 0)
 
 /* The last card press, so a press that reaches the module twice opens it once. */
 let lastPress = { element: '', at: 0 }
@@ -196,7 +198,8 @@ function tidy(w: World, now: number): World {
     if (r.type === 'main' || r.seat < CAPACITY || r.endedAt !== undefined) continue
     const seat = freeSeat(v, now)
     if (seat >= CAPACITY) break
-    v = withFloors({ ...v, robots: v.robots.map((o) => (o.id === r.id ? { ...o, seat, spawnedAt: now } : o)) }, seat)
+    const slot = printSlot(v.robots.filter((o) => o.id !== r.id), v.floors, now)
+    v = withFloors({ ...v, robots: v.robots.map((o) => (o.id === r.id ? { ...o, seat, spawnedAt: slot.at, rush: slot.rush } : o)) }, seat)
   }
   return v
 }
@@ -205,12 +208,15 @@ function ensure(w: World, id: string, now: number): World {
   if (w.robots.some((r) => r.id === id)) return w
   if (id === 'main') return { ...w, robots: [mainRobot(now), ...w.robots] }
   const seat = freeSeat(w, now)
+  // the printer builds one robot at a time: this one waits its turn
+  const slot = printSlot(w.robots, w.floors, now)
   const r: Robot = {
     id,
     type: 'agent',
     description: 'Helper',
     status: 'working',
-    spawnedAt: now,
+    spawnedAt: slot.at,
+    rush: slot.rush,
     seat,
     activity: { kind: 'think', label: '', since: now },
     calls: 0,
@@ -355,6 +361,8 @@ async function publish($: EngineInterface, fresh = false) {
   const w = await read($, world)
   const prev = await read($, display)
   const sel = await read($, selected)
+  // a new picture waits until the one before it has been laid
+  if (!fresh && prev.at && now - prev.at < SWAP_GAP_MS) return
   const next = nextDisplay(w, prev, sel, now)
   const settle = fresh || hasPlayedOut(prev, now)
   if (!settle && visualKey(next, now) === visualKey(prev, now)) return
@@ -362,6 +370,10 @@ async function publish($: EngineInterface, fresh = false) {
   if (!structural && now - prev.at < GAP_MS) return
   await update($, display, () => next)
 }
+
+/* The click layers over the picture and the cards: how many times they have been laid afresh. */
+let hits = { laid: 0, focused: false }
+const HIT_PROPS = { version: 2 } as const
 
 /* When the picture's clock starts: when its display was taken, or when the pane was resized. */
 let pictureClock = { displayAt: -1, drawnAt: 0, columns: -1 }
@@ -375,6 +387,14 @@ function pictureOf(d: Display, columns: number, now: number): string {
     lastPicture = { key, svg: buildScene({ home: d.home, floors: d.floors, robots, steps: {}, tokens: d.tokens, history: d.history }, pictureClock.drawnAt, d.selected) }
   }
   return lastPicture.svg
+}
+
+/* The picture's two layers: a new picture is laid in the one that is not on show. */
+let laid: Layers = noLayers
+function pictureLayers(d: Display, columns: number, now: number, layered: boolean): Layers {
+  const svg = pictureOf(d, columns, now)
+  laid = layPicture(laid, lastPicture.key, svg, sceneHeight(d.floors), now, layered)
+  return laid
 }
 
 /* ---------- the pane's words ---------- */
@@ -484,7 +504,8 @@ async function lastWords($: EngineInterface, id: string): Promise<string> {
 
 async function choose($: EngineInterface, id: string) {
   await update($, selected, (cur) => (cur === id ? '' : id))
-  await publish($)
+  // a click is answered at once
+  await publish($, true)
 }
 
 /* Every hook below only watches: if one fails, the work it watched goes on untouched. */
@@ -497,6 +518,10 @@ export const register: Register = (on) => {
       await $.command.register({ name: 'office', description: 'Open the Tin Collar office pane' })
       await $.ui.open({ id: PANE, title: 'Office' })
       $.clock.every(PUBLISH_EVERY_MS, () => void publish($).catch(() => {}))
+      // an upper picture layer that is due to come off has the pane drawn again
+      $.clock.every(100, () => {
+        if (laid.uncoverAt && Date.now() >= laid.uncoverAt) void update($, redraw, (n) => n + 1).catch(() => {})
+      })
       $.clock.every(HISTORY_EVERY_MS, () => void loadHistory($).catch(() => {}))
       void loadHistory($).catch(() => {})
     } catch {}
@@ -567,16 +592,36 @@ export const register: Register = (on) => {
     try {
       const id = e.agentId ?? 'main'
       const now = Date.now()
-      await update($, world, (w) =>
-        patch(w, id, now, (r) => ({
-          ...r,
-          status: 'working',
-          endedAt: undefined,
-          plan: id === 'main' ? undefined : r.plan,
-          turnStartedAt: now,
-          activity: r.activity.kind === 'idle' || r.activity.kind === 'done' ? { kind: 'think', label: '', since: now } : r.activity,
-        })),
-      )
+      await update($, world, (w0) => {
+        let w = ensure(tidy(w0, now), id, now)
+        const was = w.robots.find((r) => r.id === id)
+        // more work for a helper that had finished: still at its desk it carries on, gone from it, it is printed again
+        let again: Partial<Robot> = {}
+        if (was && was.type !== 'main' && hasStoodUp(was, w.floors, now)) {
+          const others = w.robots.filter((r) => r.id !== id)
+          const seat = freeSeat({ ...w, robots: others }, now)
+          const slot = printSlot(others, w.floors, now)
+          again = { seat, spawnedAt: slot.at, rush: slot.rush }
+          w = withFloors(w, seat)
+        }
+        return {
+          ...w,
+          robots: w.robots.map((r): Robot =>
+            r.id === id
+              ? {
+                  ...r,
+                  ...again,
+                  status: 'working',
+                  endedAt: undefined,
+                  exitAt: undefined,
+                  plan: id === 'main' ? undefined : r.plan,
+                  turnStartedAt: now,
+                  activity: r.activity.kind === 'idle' || r.activity.kind === 'done' ? { kind: 'think', label: '', since: now } : r.activity,
+                }
+              : r,
+          ),
+        }
+      })
     } catch {}
     return res
   })
@@ -597,12 +642,17 @@ export const register: Register = (on) => {
           return patch(w, id, now, (r) => ({ ...r, status: 'idle', activity: a }))
         }
         const failed = e.reason === 'error' || e.reason === 'aborted'
-        const v = patch(w, id, now, (r) => ({
+        const ended = patch(w, id, now, (r) => ({
           ...r,
           status: failed ? 'failed' : 'done',
           endedAt: now,
+          exitAt: undefined,
           activity: { kind: failed ? 'error' : 'done', label: failed ? 'FAILED' : 'REPORT', since: now },
         }))
+        // robots that finish together take turns at the main desk
+        const me = ended.robots.find((r) => r.id === id)
+        const exitAt = me ? exitSlot(me, ended.robots, ended.floors) : undefined
+        const v = { ...ended, robots: ended.robots.map((r) => (r.id === id ? { ...r, exitAt } : r)) }
         return addStep(v, id, {
           id: `${e.turnId}-report`,
           tool: 'Report',
@@ -646,16 +696,18 @@ export const register: Register = (on) => {
   })
 
   on('ui.message', async ($, e) => {
-    if (e.element.startsWith('card-')) {
-      const now = Date.now()
-      if (lastPress.element === e.element && now - lastPress.at < 350) return {}
-      lastPress = { element: e.element, at: now }
+    // a layer's name without the count of times it has been laid afresh
+    const element = e.element.replace(/~\d+$/, '')
+    const now = Date.now()
+    if (lastPress.element === element && now - lastPress.at < 350) return {}
+    lastPress = { element, at: now }
+    if (element.startsWith('card-')) {
       try {
-        await choose($, e.element.slice(5))
+        await choose($, element.slice(5))
       } catch {}
       return {}
     }
-    if (e.element !== 'hit') return {}
+    if (element !== 'hit') return {}
     try {
       const d = e.data as { fx?: number; fy?: number }
       const held = await read($, display)
@@ -700,6 +752,11 @@ export const register: Register = (on) => {
     const sel = picked || e.props.view.agentId || ''
     const Svg = e.surface !== 'terminal' ? ($.ui.resolve(e) as ElementTable<'vscode'>).Svg : null
     const Client = e.surface === 'desktop' ? ($.ui.resolve(e) as ElementTable<'desktop'>).Client : null
+    // A click layer the app has given up on shows the app's own notice in its place. Laying the
+    // layers afresh when the pane takes the focus clears it: the click that finds one broken mends it.
+    if (e.props.isFocused && !hits.focused) hits = { laid: hits.laid + 1, focused: true }
+    else if (!e.props.isFocused && hits.focused) hits = { ...hits, focused: false }
+    const layer = (name: string) => (hits.laid ? `${name}~${hits.laid}` : name)
 
     const robots = w.robots
       .filter((r) => r.type === 'main' || r.endedAt === undefined || now - r.endedAt < LIST_KEEP_MS)
@@ -809,7 +866,7 @@ export const register: Register = (on) => {
         <Box position="relative" flexDirection="column">
           {face}
           <Box position="absolute" top={0} left={0} width="100%" height="100%">
-            <Client key={`card-${r.id}`} module="./hit.tsx" width="100%" height="100%" props={{ version: 1 }} />
+            <Client key={layer(`card-${r.id}`)} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
           </Box>
         </Box>
       ) : (
@@ -847,14 +904,20 @@ export const register: Register = (on) => {
 
     if (!Svg) return list
 
-    // A plain image, not a frame: swapping an image does not reload a page.
-    const svg = pictureOf(shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now), e.props.bodyColumns, now)
-    const picture = <Svg source={svg} alt={`Tin Collar office: ${robots.map((r) => `${robotName(r)} ${stateWord(r)}`).join(', ')}`} />
+    // A plain image, not a frame: swapping an image does not reload a page. Two layers of it,
+    // because an image given a new picture shows the old one from its start until the new one loads.
+    await read($, redraw)
+    const layers = pictureLayers(shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now), e.props.bodyColumns, now, !!Client)
+    const alt = `Tin Collar office: ${robots.map((r) => `${robotName(r)} ${stateWord(r)}`).join(', ')}`
+    const picture = <Svg source={layers.lower} alt={alt} />
     const room = Client ? (
       <Box position="relative">
         {picture}
+        <Box key="over" position="absolute" top={0} left={0} width="100%" height="100%" display={layers.covered ? 'flex' : 'none'}>
+          <Svg source={layers.upper} alt={alt} />
+        </Box>
         <Box position="absolute" top={0} left={0} width="100%" height="100%">
-          <Client key="hit" module="./hit.tsx" width="100%" height="100%" props={{ version: 1 }} />
+          <Client key={layer('hit')} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
         </Box>
       </Box>
     ) : (

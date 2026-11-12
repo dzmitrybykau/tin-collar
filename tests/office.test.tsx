@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { buildScene, CAPACITY, chartRows, floorsFor, girthOf, phaseOf, positionOf, roleOf, seatFor, skyKey, transitionsOf } from '../hooks/scene'
+import { buildScene, CAPACITY, chartRows, exitSlot, fit, floorsFor, girthOf, hasStoodUp, layPicture, noLayers, phaseOf, positionOf, printSlot, roleOf, seatFor, skyKey, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -271,4 +271,123 @@ test('the window follows the hour on the computer clock', () => {
   const at = (h: number, m = 0) => new Date(2026, 10, 12, h, m).getTime()
   expect(skyKey(at(9, 5))).toBe(skyKey(at(9, 55)))
   expect(skyKey(at(9, 55))).not.toBe(skyKey(at(10, 5)))
+})
+
+/* ---------- moving about: no robot jumps, and no two stand in one spot ---------- */
+const helper = (id: string, seat: number, spawnedAt: number, more: Partial<Robot> = {}): Robot => ({
+  id, type: 'general-purpose', description: 'Helper', status: 'working', spawnedAt, seat,
+  activity: { kind: 'think', label: '', since: spawnedAt }, calls: 0, errors: 0, ...more,
+})
+
+test('a robot walks every step of its way: it never jumps across the room', () => {
+  for (const [seat, floors] of [[0, 0], [1, 1], [4, 1], [8, 2]] as const) {
+    const robot = helper('a1', seat, 0, { status: 'done', endedAt: 1000 })
+    const p = phaseOf(robot, floors)!
+    let last = positionOf(robot, floors, 0)!
+    for (let t = 20; t < p.jumpAt!; t += 20) {
+      const at = positionOf(robot, floors, t)!
+      // twenty milliseconds of walking or of the lift is under three pixels; sitting down is six
+      expect(Math.abs(at.x - last.x) + Math.abs(at.y - last.y)).toBeLessThanOrEqual(8)
+      last = at
+    }
+  }
+})
+
+test('robots started at the same moment are printed one after another', () => {
+  const now = 50_000
+  let robots: Robot[] = []
+  for (const id of ['a1', 'a2', 'a3', 'a4']) {
+    const slot = printSlot(robots, 1, now)
+    robots = [...robots, helper(id, robots.length, slot.at, { rush: slot.rush })]
+  }
+  const phases = robots.map((r) => phaseOf(r, 1)!)
+  expect(robots[0]!.spawnedAt).toBe(now)
+  for (let i = 1; i < phases.length; i++) {
+    // the plate is free before the next robot rises on it
+    expect(phases[i]!.feedEnd).toBeGreaterThan(phases[i - 1]!.printEnd)
+    // and each has left the briefing spot before the next one reaches it
+    expect(phases[i]!.briefAt).toBeGreaterThan(phases[i - 1]!.briefEnd)
+  }
+  // a queue is worked off quickly: four robots are out within twelve seconds
+  expect(phases[3]!.printEnd - now).toBeLessThan(12_000)
+  // with the printer free again, the next order starts at once
+  expect(printSlot(robots, 1, phases[3]!.printEnd + 5000).at).toBe(phases[3]!.printEnd + 5000)
+})
+
+test('robots that finish together hand in their reports one at a time', () => {
+  const ended = 60_000
+  let robots: Robot[] = []
+  for (const [id, seat] of [['a1', 0], ['a2', 1], ['a3', 2], ['a4', 3]] as const) {
+    const done = helper(id, seat, 0, { status: 'done', endedAt: ended })
+    robots = [...robots, { ...done, exitAt: exitSlot(done, robots, 1) }]
+  }
+  const hands = robots.map((r) => phaseOf(r, 1)!.handAt!).sort((a, b) => a - b)
+  for (let i = 1; i < hands.length; i++) expect(hands[i]! - hands[i - 1]!).toBeGreaterThanOrEqual(1500)
+  // nobody leaves before its work is over
+  for (const r of robots) expect(phaseOf(r, 1)!.workEnd!).toBeGreaterThanOrEqual(ended)
+})
+
+test('a robot that has dropped into the vat does not flash back at the hatch', () => {
+  const main = helper('main', -1, -99_999, { type: 'main' })
+  const leaver = helper('a1', 1, 0, { status: 'done', endedAt: 1000 })
+  const p = phaseOf(leaver, 1)!
+  const scene = (now: number) => buildScene({ home: 'Office', floors: 1, robots: [main, leaver], steps: {} }, now)
+  expect(scene(p.jumpAt! + 50)).toContain('id="melt-a1"')
+  expect(scene(p.splashAt! + 20)).not.toContain('id="melt-a1"')
+})
+
+test('the lights stay on while helpers are at work, and go down only in an empty office', () => {
+  const main = helper('main', -1, -99_999, { type: 'main', status: 'idle', activity: { kind: 'idle', label: '', since: 0 } })
+  const busy = helper('a1', 0, -60_000)
+  const scene = (robots: Robot[]) => buildScene({ home: 'Office', floors: 0, robots, steps: {} }, 0)
+  const lightsDown = 'fill="#0a061e" opacity="0.32"'
+  expect(scene([main])).toContain(lightsDown)
+  expect(scene([main, busy])).not.toContain(lightsDown)
+})
+
+test('a finished robot given more work carries on at its desk, or is printed again once it has left', () => {
+  const done = helper('a1', 0, 0, { status: 'done', endedAt: 20_000 })
+  const p = phaseOf(done, 0)!
+  expect(hasStoodUp(done, 0, p.leaveAt! - 100)).toBe(false)
+  expect(hasStoodUp(done, 0, p.leaveAt! + 100)).toBe(true)
+  expect(hasStoodUp(helper('a2', 0, 0), 0, 99_999)).toBe(false)
+})
+
+test('a new picture is never laid in the layer that is on show', () => {
+  // An image given a new picture shows the old one from its start until the new one loads,
+  // which throws every robot back to where it stood when that picture was drawn.
+  let now = 0
+  let l = layPicture(noLayers, 'p1', 'pic1', 184, now, true)
+  expect(l.lower).toBe('pic1')
+  expect(l.covered).toBe(false)
+  for (let n = 2; n <= 7; n++) {
+    now += 400
+    const before = layPicture(l, l.key, '', l.height, now, true)
+    const onShow = before.covered ? 'upper' : 'lower'
+    const after = layPicture(before, `p${n}`, `pic${n}`, 184, now, true)
+    expect(after[onShow]).toBe(before[onShow])
+    expect(after[onShow === 'upper' ? 'lower' : 'upper']).toBe(`pic${n}`)
+    l = after
+  }
+  // a picture laid underneath is uncovered once it has had time to load
+  const under = layPicture(layPicture(layPicture(noLayers, 'a', 'A', 184, 0, true), 'b', 'B', 184, 400, true), 'c', 'C', 184, 800, true)
+  expect(under.covered).toBe(true)
+  expect(under.lower).toBe('C')
+  expect(layPicture(under, 'c', 'C', 184, 900, true).covered).toBe(true)
+  expect(layPicture(under, 'c', 'C', 184, 1200, true).covered).toBe(false)
+  // a building that has grown a floor, and a surface with one layer, are laid plainly
+  const grown = layPicture(under, 'd', 'D', 240, 1300, true)
+  expect(grown.lower).toBe('D')
+  expect(grown.covered).toBe(false)
+  const single = layPicture(layPicture(noLayers, 'a', 'A', 184, 0, false), 'b', 'B', 184, 400, false)
+  expect(single.lower).toBe('B')
+  expect(single.covered).toBe(false)
+})
+
+test('a label too long for its bubble is cut on a whole word and says so', () => {
+  expect(fit('README.md', 60)).toBe('README.MD')
+  expect(fit('palette check', 48)).toBe('PALETTE..')
+  expect(fit('docs.python.org', 66)).toBe('DOCS.PYTHON.ORG')
+  // one long word is cut where it must be
+  expect(fit('office.test.tsx', 40)).toBe('OFFICE.TE..')
 })

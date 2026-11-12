@@ -40,8 +40,13 @@ export type Robot = {
   /** Tokens in its context window as of its latest model request. */
   context?: number
   status: RobotStatus
+  /** When the printer starts on it: robots ordered together are printed one after another. */
   spawnedAt: number
+  /** Printed at the double, because others were waiting for the printer. */
+  rush?: boolean
   endedAt?: number
+  /** The earliest it may stand up, so robots that finish together hand in their reports one at a time. */
+  exitAt?: number
   seat: number
   activity: Activity
   calls: number
@@ -94,6 +99,8 @@ declare module 'claude-code' {
       world: Shaped<World>
       display: Shaped<Display>
       selected: string
+      /** Counts up to have the pane drawn again when a picture layer is due to come off. */
+      redraw: number
     }
   }
 }

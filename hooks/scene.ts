@@ -1095,26 +1095,30 @@ const SIGN_H = 11
 const BOARD = { x: 176, y: 24, w: 46, h: 25 }
 const FRAME = { x: SIGN_CX - 35, y: BOARD.y, w: 70, h: BOARD.h }
 const WALL_SHADOW = '#2a4656'
-// The recycling corner: a hatch in the floor drops onto a vat of molten metal,
+// The recycling corner: a hatch in the floor drops onto a ladle of molten metal,
 // which a pipe carries back to the printer.
 const HOLE_X0 = 173
 const HOLE_W = 12
 const HOLE_X = HOLE_X0 + (HOLE_W >> 1)
 const DELIVER_X = 162
 const BRIEF_X = 92
-const VAT = { x: 154, y: 136, w: 50, h: 32 }
-const MELT_Y = VAT.y + 3
-// The pit under the hatch: a shaft with a stone wall each side of the vat. Shut, it is pitch dark
-// inside; the vat shows only while the hatch stands open and the room's light falls in.
-const PIT = { x0: 144, x1: 214, top: FY + 7, bottom: GROUND_H - 2 } // the inside, between the walls
-const PIT_WALL = 4
-const PIT_DARK = '#07050d'
-const HATCH_DIM_MS = 100
+const LADLE_TOP = 132 // the far edge of the ladle's rim
+const MELT_Y = LADLE_TOP + 2 // the metal's surface, where a robot goes under
+const JOINT_X = 157 // where the pipe is bolted to the ladle
+// The cellar is dark from wall to wall. What shows in it is what the metal lights; daylight comes
+// in only through the hatch, while it stands open.
+const CELLAR = '#0b0812'
+const DIM = { out: '#05040a', body: '#23243a', lit: '#383b58' }
+const LADLE = { out: '#05040a', body: '#2d2e48', lit: '#4d5074', shade: '#1b1c2e' }
 const HATCH_LEAD_MS = 250
 const HATCH_HOLD_MS = 350
+/** How long the joint weeps after a splash. */
+export const LEAK_MS = 3600
+/** How long a compaction's hop lasts, bolts and all. */
+export const SHED_MS = 1700
 // The recycling pipe: a riser under the printer, a rounded elbow, and a run to the vat.
 const PIPE_X = 18 // the riser's left outline
-const PIPE_Y = VAT.y + 17 // the run's top outline
+const PIPE_Y = 153 // the run's top outline
 const PIPE_W = 6 // outline, four pixels of bore, outline
 const BEND_R = 9 // outer radius of the elbow
 const BEND_CX = PIPE_X + BEND_R
@@ -1466,7 +1470,6 @@ function paintWindow(hour: number): Px {
 
 function paintGround(home: string): Px {
   const g = new Px(W, GROUND_H)
-  const r = rng(home.length * 97 + 11)
   R(g, C.slate, 0, 6, W, 98)
   for (let x = 4; x < W; x += 8) R(g, C.slateL, x, 8, 1, 94)
   R(g, '#243a4a', 0, 6, W, 2)
@@ -1509,7 +1512,7 @@ function paintGround(home: string): Px {
     R(g, C.amber, 4 + i, FY - 2, 2, 2)
     R(g, C.ink, 6 + i, FY - 2, 2, 2)
   }
-  basement(g, r)
+  basement(g)
   shaft(g, 0, FY, FY, 1)
   return g
 }
@@ -1528,15 +1531,15 @@ function elbow(g: Px) {
       const d = Math.hypot(dx, dy)
       if (d < inner || d >= BEND_R) continue
       const lit = (BEND_R - 1.5) + ((inner + 1.5) - (BEND_R - 1.5)) * (Math.atan2(dy, dx) / (Math.PI / 2))
-      const c = d >= BEND_R - 1 || d < inner + 1 ? C.ink : Math.abs(d - lit) < 0.6 ? C.steel : C.steelD
+      const c = d >= BEND_R - 1 || d < inner + 1 ? DIM.out : Math.abs(d - lit) < 0.6 ? DIM.lit : DIM.body
       R(g, c, x, y, 1, 1)
     }
   }
   // collars where the bend meets the straight runs
-  R(g, C.ink, PIPE_X - 1, BEND_CY - 2, PIPE_W + 2, 2)
-  R(g, C.steel, PIPE_X, BEND_CY - 2, PIPE_W, 1)
-  R(g, C.ink, BEND_CX, PIPE_Y - 1, 2, PIPE_W + 2)
-  R(g, C.steel, BEND_CX, PIPE_Y, 1, PIPE_W)
+  R(g, DIM.out, PIPE_X - 1, BEND_CY - 2, PIPE_W + 2, 2)
+  R(g, DIM.lit, PIPE_X, BEND_CY - 2, PIPE_W, 1)
+  R(g, DIM.out, BEND_CX, PIPE_Y - 1, 2, PIPE_W + 2)
+  R(g, DIM.lit, BEND_CX, PIPE_Y, 1, PIPE_W)
 }
 
 const GOLD = '#d4a83a'
@@ -1591,61 +1594,98 @@ function employeeFrame(tally: TokenTally | undefined, now: number, detail: Detai
 }
 
 /** Under the ground floor: the chute, the vat of molten metal and the pipe back to the printer. */
-function basement(g: Px, r: () => number) {
+/** A solid shape from a half-width per row, with a one-pixel outline round it. */
+function solid(g: Px, cx: number, y0: number, hws: number[], fill: string, out: string) {
+  hws.forEach((hw, i) => {
+    R(g, out, cx - hw, y0 + i - 1, hw * 2 + 1, 1)
+    R(g, out, cx - hw, y0 + i + 1, hw * 2 + 1, 1)
+    R(g, out, cx - hw - 1, y0 + i, hw * 2 + 3, 1)
+  })
+  hws.forEach((hw, i) => R(g, fill, cx - hw, y0 + i, hw * 2 + 1, 1))
+}
+
+/** The metal's surface in the ladle's mouth, seen a little from above; `k` moves the light on it. */
+function meltSurface(g: Px, cx: number, y: number, rx: number, k = 0) {
+  const far = Math.round(rx * 0.86)
+  R(g, '#ffb347', cx - far, y - 1, far * 2 + 1, 1)
+  R(g, '#fff1a8', cx - rx, y, rx * 2 + 1, 1)
+  R(g, '#ff8a2a', cx - far, y + 1, far * 2 + 1, 1)
+  R(g, '#ffd166', cx - 11 + k * 4, y - 1, 3, 1)
+  R(g, '#ffd166', cx + 6 - k * 3, y + 1, 4, 1)
+}
+
+/** The ladle: a tapered, hooped bucket slung between two posts, brim-full of molten metal. */
+function ladle(g: Px) {
+  const cx = HOLE_X
+  const { out, body, lit, shade } = LADLE
+  const top = LADLE_TOP + 5
+  // the cradle's posts, behind it
+  for (const px of [cx - 27, cx + 25]) {
+    R(g, out, px - 1, 146, 5, 21)
+    R(g, shade, px, 147, 3, 19)
+    R(g, out, px - 4, 164, 11, 4)
+    R(g, body, px - 3, 165, 9, 2)
+  }
+  const hws: number[] = []
+  for (let y = top; y <= 163; y++) hws.push(Math.round(23 - (y - top) * 0.24) - (y === 163 ? 3 : y === 162 ? 1 : 0))
+  solid(g, cx, top, hws, body, out)
+  hws.forEach((hw, i) => {
+    R(g, lit, cx - hw, top + i, 2, 1)
+    R(g, shade, cx + hw - 3, top + i, 4, 1)
+  })
+  // two hoops, riveted
+  for (const hy of [143, 154]) {
+    const hw = hws[hy - top]!
+    R(g, lit, cx - hw, hy, hw * 2 + 1, 1)
+    R(g, out, cx - hw, hy + 1, hw * 2 + 1, 1)
+    for (let x = cx - hw + 3; x < cx + hw; x += 6) R(g, shade, x, hy, 1, 1)
+  }
+  // the rim, the pouring lip and the metal
+  solid(g, cx, LADLE_TOP, [23, 24, 24, 24, 24], body, out)
+  R(g, lit, cx - 23, LADLE_TOP, 47, 1)
+  R(g, out, cx + 24, LADLE_TOP - 2, 6, 5)
+  R(g, lit, cx + 25, LADLE_TOP - 1, 4, 2)
+  meltSurface(g, cx, MELT_Y, 21)
+  R(g, lit, cx - 24, LADLE_TOP + 4, 49, 1)
+  // the trunnions it hangs by
+  for (const tx0 of [cx - 26, cx + 26]) {
+    disc(g, out, tx0, 148, 4)
+    disc(g, lit, tx0, 148, 3)
+    R(g, out, tx0, 148, 1, 1)
+  }
+}
+
+function basement(g: Px) {
   const top = FY + 7
   const bottom = GROUND_H
-  R(g, '#1f1826', 0, top, W, bottom - top)
-  for (let y = top + 3, row = 0; y < bottom - 3; y += 6, row++) for (let x = row % 2 ? 8 : 0; x < W; x += 16) R(g, '#291f33', x, y, 15, 1)
-  for (let i = 0; i < 14; i++) R(g, '#2c2238', Math.floor(r() * W), top + 2 + Math.floor(r() * (bottom - top - 6)), 2, 1)
+  R(g, CELLAR, 0, top, W, bottom - top)
   R(g, C.ink, 0, bottom - 2, W, 2)
-  // the hatch in the floor, closed, and the chute under it
+  // the hatch in the floor, closed
   R(g, C.ink, HOLE_X0 - 1, FY, HOLE_W + 2, 3)
   R(g, '#4a4f70', HOLE_X0, FY + 1, HOLE_W, 1)
   R(g, C.amber, HOLE_X0, FY, 2, 1)
   R(g, C.amber, HOLE_X0 + HOLE_W - 2, FY, 2, 1)
-  R(g, '#15101c', HOLE_X0, top, HOLE_W, VAT.y - top)
-  R(g, C.steelD, HOLE_X0 - 1, top, 1, VAT.y - top)
-  R(g, C.steelD, HOLE_X0 + HOLE_W, top, 1, VAT.y - top)
-  for (let y = top + 2; y < VAT.y - 1; y += 6) {
-    R(g, C.amber, HOLE_X0 - 3, y, 2, 2)
-    R(g, C.amber, HOLE_X0 + HOLE_W + 1, y, 2, 2)
-  }
-  // the vat, cut away so its molten load shows
-  R(g, C.ink, VAT.x - 1, VAT.y - 1, VAT.w + 2, VAT.h + 1)
-  R(g, '#2a1714', VAT.x + 3, VAT.y, VAT.w - 6, MELT_Y - VAT.y)
-  const molten: Array<[number, string]> = [[1, '#fff1a8'], [2, '#ffd166'], [3, '#ffb347'], [6, '#ff8a2a'], [8, '#f06a24'], [99, '#c8401c']]
-  let y = MELT_Y
-  for (const [rows, c] of molten) {
-    const n = Math.min(rows, VAT.y + VAT.h - 4 - y)
-    if (n <= 0) break
-    R(g, c, VAT.x + 3, y, VAT.w - 6, n)
-    y += n
-  }
-  for (const [mx, my, mw] of [[VAT.x + 8, MELT_Y + 9, 7], [VAT.x + 27, MELT_Y + 13, 9], [VAT.x + 16, MELT_Y + 19, 6], [VAT.x + 36, MELT_Y + 7, 5]] as const)
-    R(g, '#ffb347', mx, my, mw, 1)
-  R(g, '#5b5f7a', VAT.x, VAT.y, 3, VAT.h - 1)
-  R(g, '#5b5f7a', VAT.x + VAT.w - 3, VAT.y, 3, VAT.h - 1)
-  R(g, '#7a80a0', VAT.x, VAT.y, 1, VAT.h - 2)
-  R(g, '#7a80a0', VAT.x + VAT.w - 3, VAT.y, 1, VAT.h - 2)
-  R(g, '#3b3f55', VAT.x, VAT.y + VAT.h - 4, VAT.w, 3)
-  R(g, '#7a80a0', VAT.x - 2, VAT.y - 1, 6, 1)
-  R(g, '#7a80a0', VAT.x + VAT.w - 4, VAT.y - 1, 6, 1)
-  for (let ry = VAT.y + 4; ry < VAT.y + VAT.h - 5; ry += 6) {
-    R(g, C.steelL, VAT.x + 1, ry, 1, 1)
-    R(g, C.steelL, VAT.x + VAT.w - 2, ry, 1, 1)
-  }
-  // the pipe that carries the metal back to the printer: riser, elbow, run
-  R(g, C.ink, PIPE_X, FY + 1, PIPE_W, BEND_CY - FY - 1)
-  R(g, C.steelD, PIPE_X + 1, FY + 1, PIPE_W - 2, BEND_CY - FY - 1)
-  R(g, C.steel, PIPE_X + 1, FY + 1, 1, BEND_CY - FY - 1)
-  R(g, C.ink, BEND_CX, PIPE_Y, VAT.x - BEND_CX, PIPE_W)
-  R(g, C.steelD, BEND_CX, PIPE_Y + 1, VAT.x - BEND_CX, PIPE_W - 2)
-  R(g, C.steel, BEND_CX, PIPE_Y + 1, VAT.x - BEND_CX, 1)
+  // the pipe that carries the metal back to the printer: riser, elbow, run. Through the floor it
+  // is lit by the room; down here it is a dim shape with glowing joints
+  R(g, C.ink, PIPE_X, FY + 1, PIPE_W, top - FY - 1)
+  R(g, C.steelD, PIPE_X + 1, FY + 1, PIPE_W - 2, top - FY - 1)
+  R(g, C.steel, PIPE_X + 1, FY + 1, 1, top - FY - 1)
+  R(g, DIM.out, PIPE_X, top, PIPE_W, BEND_CY - top)
+  R(g, DIM.body, PIPE_X + 1, top, PIPE_W - 2, BEND_CY - top)
+  R(g, DIM.lit, PIPE_X + 1, top, 1, BEND_CY - top)
+  R(g, DIM.out, BEND_CX, PIPE_Y, JOINT_X - BEND_CX, PIPE_W)
+  R(g, DIM.body, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, PIPE_W - 2)
+  R(g, DIM.lit, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, 1)
   elbow(g)
-  for (let x = 46; x < PIT.x0 - PIT_WALL - 20; x += 28) {
-    R(g, C.ink, x, PIPE_Y - 1, 3, PIPE_W + 2)
-    R(g, '#ff9a3c', x + 1, PIPE_Y + 2, 1, 2)
+  for (let x = 46; x < JOINT_X - 20; x += 28) {
+    R(g, DIM.out, x, PIPE_Y - 1, 3, PIPE_W + 2)
+    R(g, '#ff9a3c', x + 1, PIPE_Y + 1, 1, 4)
   }
+  ladle(g)
+  // the joint that bolts the pipe to the ladle
+  R(g, DIM.out, JOINT_X, PIPE_Y - 3, 4, PIPE_W + 6)
+  R(g, DIM.body, JOINT_X + 1, PIPE_Y - 2, 3, PIPE_W + 4)
+  R(g, DIM.lit, JOINT_X + 1, PIPE_Y - 2, 1, PIPE_W + 4)
 }
 
 function paintUpper(floor: number): Px {
@@ -2123,7 +2163,7 @@ function walkLegs(pts: Pt[], cum: number[], startAt: number, now: number, frames
 function feedPath(): Pt[] {
   const mid = PIPE_Y + PIPE_W / 2
   const midR = BEND_R - PIPE_W / 2
-  const pts: Pt[] = [[PIT.x0 - PIT_WALL + 1, mid]]
+  const pts: Pt[] = [[JOINT_X, mid]]
   for (let i = 0; i <= 6; i++) {
     const a = (Math.PI / 2) * (1 - i / 6)
     pts.push([BEND_CX - Math.cos(a) * midR, BEND_CY + Math.sin(a) * midR])
@@ -2157,52 +2197,21 @@ function feedSvg(spawnedAt: number, feedEnd: number, sec: (t: number) => number,
   return glowDef + during(sec(spawnedAt), sec(feedEnd), moving)
 }
 
-/** Bubbles on the molten metal and the glow it throws on the basement walls. */
-function vatLife(detail: Detail): string {
-  const glow = `<defs><radialGradient id="melt" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ff8a2a" stop-opacity="0.42"/><stop offset="1" stop-color="#ff8a2a" stop-opacity="0"/></radialGradient><clipPath id="pitwalls"><rect x="${PIT.x0}" y="${PIT.top}" width="${PIT.x1 - PIT.x0}" height="${PIT.bottom - PIT.top}"/></clipPath></defs><ellipse cx="${HOLE_X}" cy="${MELT_Y}" rx="48" ry="22" fill="url(#melt)" clip-path="url(#pitwalls)"/>`
-  const flow = sprite(VAT.w - 6, VAT.h - 8, [0, 0.5, 1], [0.5, 0.5, 0.5], detail, (g, t) => {
+/** The metal is never still: light runs across it, and now and then a bubble comes up. */
+function meltLife(detail: Detail): string {
+  return sprite(47, 6, [0, 0.5, 1, 1.5], [0.5, 0.5, 0.5, 0.5], detail, (g, t) => {
     const k = Math.round(t / 0.5)
-    for (const [fx, fy, fw] of [[4, 10, 6], [20, 15, 8], [33, 21, 5], [11, 24, 7]] as const) R(g, '#ffd166', (fx + k * 3) % (VAT.w - 12), fy - k, fw, 1)
+    meltSurface(g, 23, 4, 21, k)
+    if (k === 2) R(g, '#fff1a8', 31, 3, 2, 1)
+    if (k === 3) R(g, '#ffd166', 31, 1, 2, 2)
   })
-  const bubbles = sprite(VAT.w, 4, [0, 0.4, 0.8], [0.4, 0.4, 0.4], detail, (g, t) => {
-    const k = Math.round(t / 0.4)
-    for (const [bx, phase] of [[6, 0], [17, 1], [29, 2], [38, 1]] as const) {
-      const s = (k + phase) % 3
-      if (s === 0) R(g, '#ffd166', bx, 2, 2, 1)
-      else if (s === 1) R(g, '#ffb347', bx, 1, 3, 2)
-    }
-  })
-  return glow + at(VAT.x + 3, MELT_Y, flow) + at(VAT.x, MELT_Y - 3, bubbles)
-}
-
-/** Rectangles of one colour, as a single shape. */
-const boxes = (fill: string, list: Array<[x: number, y: number, w: number, h: number]>) =>
-  `<path fill="${fill}" d="${list.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h-${w}z`).join('')}"/>`
-
-/** The pit's lining: a stone wall each side of the vat, and the flange that bolts the pipe to the left one. */
-function pitFrame(): string {
-  const { x0, x1, top, bottom } = PIT
-  const h = bottom - top
-  const walls = [x0 - PIT_WALL, x1]
-  const joints: Array<[number, number, number, number]> = []
-  for (const x of walls) for (let y = top + 6; y < bottom; y += 6) joints.push([x, y, PIT_WALL, 1])
-  const fx = x0 - PIT_WALL - 4
-  return (
-    boxes('#3a2e48', walls.map((x) => [x, top, PIT_WALL, h])) +
-    boxes('#54446a', [[x0 - PIT_WALL, top, 1, h], [x1 + PIT_WALL - 1, top, 1, h]]) +
-    boxes(C.ink, [...joints, [fx, PIPE_Y - 3, 4, PIPE_W + 6]]) +
-    boxes(C.steelD, [[fx + 1, PIPE_Y - 2, 3, PIPE_W + 4]]) +
-    boxes(C.steel, [[fx + 1, PIPE_Y - 2, 1, PIPE_W + 4]]) +
-    boxes(C.steelL, [[fx + 2, PIPE_Y - 1, 1, 1], [fx + 2, PIPE_Y + PIPE_W, 1, 1]])
-  )
 }
 
 /**
- * The pit, drawn over whatever is inside it: pitch dark between its walls while the hatch is shut.
- * Each drop opens the hatch and the room's light falls in; when the hatch slams shut the dark is
- * back at once, with a puff of dust.
+ * Daylight in the cellar. While the hatch stands open, three hard-edged rays fall through it onto
+ * the ladle, with dust hanging in them; when it slams shut there is a puff of dust at the floor.
  */
-function pitSvg(drops: Array<{ open: number; shut: number }>, sec: (t: number) => number, detail: Detail): string {
+function hatchLight(drops: Array<{ open: number; shut: number }>, sec: (t: number) => number, detail: Detail): string {
   // the spans the hatch stands open; drops that follow close on each other share one
   const spans: Array<{ open: number; shut: number }> = []
   for (const d of [...drops].sort((a, b) => a.open - b.open)) {
@@ -2211,25 +2220,23 @@ function pitSvg(drops: Array<{ open: number; shut: number }>, sec: (t: number) =
     if (last && d.open <= last.shut) last.shut = Math.max(last.shut, d.shut)
     else spans.push({ ...d })
   }
-  const dark = (opacity: string) => `<rect x="${PIT.x0}" y="${PIT.top}" width="${PIT.x1 - PIT.x0}" height="${PIT.bottom - PIT.top}" fill="${PIT_DARK}"${opacity}/>`
-  const lit = spans.length > 0 && sec(spans[0]!.open) <= 0
-  let sets = ''
-  for (const s of spans) {
-    if (sec(s.open) > 0) sets += `<set attributeName="display" to="none" begin="${s2(sec(s.open))}s"/>`
-    sets += `<set attributeName="display" to="inline" begin="${s2(sec(s.shut))}s"/>`
+  if (!spans.length) return ''
+  const top = FY + 7
+  const beams = (list: Array<[a0: number, ka: number, b0: number, kb: number]>) => {
+    const g = new Px(W, GROUND_H)
+    for (const [a0, ka, b0, kb] of list)
+      for (let y = top; y < GROUND_H - 2; y++) {
+        const a = Math.round(a0 + ka * (y - top))
+        const b = Math.round(b0 + kb * (y - top))
+        if (b > a) R(g, '#cfc4ff', a, y, b - a, 1)
+      }
+    return g.svg()
   }
-  let out = `<g display="${lit ? 'none' : 'inline'}">${sets}${dark('')}</g>`
-  // the eye takes a moment to see into the pit
-  for (const s of spans) out += during(sec(s.open), sec(s.open + HATCH_DIM_MS), dark(' opacity="0.5"'))
-  out += cached('pit', pitFrame)
-  if (!spans.length) return out
-  const shaft = new Px(W, GROUND_H)
-  for (let y = FY + 1; y < MELT_Y; y++) {
-    const spread = y < VAT.y ? 0 : y - VAT.y + 1
-    R(shaft, C.lamp, HOLE_X0 - spread, y, HOLE_W + spread * 2, 1)
-  }
-  R(shaft, C.white, HOLE_X0 - 4, MELT_Y, HOLE_W + 8, 1)
-  const light = `<g opacity="0.24">${shaft.svg()}</g>`
+  const motes = new Px(W, GROUND_H)
+  for (const [mx, my] of [[170, 131], [187, 138], [163, 147], [194, 153], [181, 127], [176, 158]] as const) R(motes, '#e6defa', mx, my, 1, 1)
+  const light =
+    `<g data-what="rays"><g opacity="0.1">${beams([[HOLE_X0, -0.7, HOLE_X0 + 3, -0.38], [HOLE_X0 + HOLE_W - 3, 0.38, HOLE_X0 + HOLE_W, 0.7]])}</g>` +
+    `<g opacity="0.2">${beams([[HOLE_X0 + 2, -0.17, HOLE_X0 + HOLE_W - 2, 0.17]])}</g>${motes.svg()}</g>`
   const dust = sprite(W, GROUND_H, [0, 0.15], [0.15, 0.15], detail, (g, t) => {
     const k = t > 0 ? 1 : 0
     for (const [dx, dir] of [[HOLE_X0 - 3, -1], [HOLE_X0 + HOLE_W + 1, 1]] as const) {
@@ -2237,8 +2244,57 @@ function pitSvg(drops: Array<{ open: number; shut: number }>, sec: (t: number) =
       R(g, C.steel, dx + dir * (2 + k * 2), FY - 1 - k * 2, 1, 1)
     }
   })
+  let out = ''
   for (const s of spans) out += during(sec(s.open), sec(s.shut), light) + during(sec(s.shut), sec(s.shut + 300), dust)
   return out
+}
+
+/** A splash shakes the joint where the pipe meets the ladle: a seam glows, drops fall, a small pool gathers. */
+function leakSvg(detail: Detail): string {
+  const y0 = PIPE_Y + PIPE_W + 2
+  const pool = GROUND_H - 3 - y0
+  const drip = sprite(9, pool + 1, [0, 0.25, 0.5, 0.75], [0.25, 0.25, 0.25, 0.25], detail, (g, t) => {
+    const k = Math.round(t / 0.25)
+    R(g, '#ffd166', 3, 0, 2, 1)
+    if (k === 0) R(g, '#ffd166', 4, 1, 1, 1)
+    else if (k === 1) R(g, '#ffd166', 4, 2, 1, 2)
+    else if (k === 2) R(g, '#ffb347', 4, 4, 1, 2)
+    R(g, '#ff8a2a', 1, pool, 7, 1)
+    R(g, k === 3 ? '#fff1a8' : '#ffd166', 3, pool, 3, 1)
+  })
+  return `<g data-what="leak">${at(JOINT_X - 2, y0, drip)}</g>`
+}
+
+/**
+ * A compaction: the robot gets up, hops twice and sheds bolts, the context it no longer carries.
+ * It stands at `x` on the floor `fy`; the bolts lie where they fell until the time is up.
+ */
+function shedSvg(role: string, small: boolean, girth: number, x: number, fy: number, t0: number, sec: (t: number) => number, detail: Detail): string {
+  const body = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small, pose: 'cheer', eyes: 'happy', girth }))
+  // every move ends where it rests, so a picture drawn part-way through shows it there
+  const a = `${x - 13} ${fy - 32}`
+  const up = `${x - 13} ${fy - 39}`
+  const hops = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${a};${up};${a};${up};${a}" keyTimes="0;0.25;0.5;0.75;1" calcMode="spline" keySplines="0 0 0.58 1;0.42 0 1 1;0 0 0.58 1;0.42 0 1 1" begin="${s2(sec(t0 + 150))}s" dur="0.9s" fill="freeze"/>${body}</g>`
+  const steel = new Px(2, 2)
+  R(steel, C.steel, 0, 0, 2, 2)
+  R(steel, C.steelL, 0, 0, 1, 1)
+  const brass = new Px(3, 1)
+  R(brass, C.amber, 0, 0, 2, 1)
+  R(brass, C.steelL, 2, 0, 1, 1)
+  let bolts = ''
+  for (let i = 0; i < 8; i++) {
+    const side = i % 2 ? 1 : -1
+    const reach = 5 + ((i * 5) % 11)
+    const from = `${x + side * 2} ${fy - 9}`
+    const peak = `${x + side * (reach >> 1)} ${fy - 17 - (i % 3) * 2}`
+    const land = `${x + side * reach} ${fy - 2}`
+    const skip = `${x + side * (reach + 2)} ${fy - 4}`
+    const rest = `${x + side * (reach + 3)} ${fy - 2}`
+    const tb = t0 + 250 + i * 110
+    const fly = `<g transform="translate(${rest})"><animateTransform attributeName="transform" type="translate" values="${from};${peak};${land};${skip};${rest}" keyTimes="0;0.3;0.7;0.85;1" begin="${s2(sec(tb))}s" dur="0.6s" fill="freeze"/>${(i % 3 ? steel : brass).svg()}</g>`
+    bolts += during(sec(tb), null, fly)
+  }
+  return `<g data-what="shed">${during(sec(t0), sec(t0 + SHED_MS), hops + bolts)}</g>`
 }
 
 function compose(world: World, now: number, selected: string, detail: Detail): string {
@@ -2276,12 +2332,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
   ground += `<clipPath id="chamber"><rect x="${PRINTER.x + 4}" y="${PRINTER.y + 4}" width="${PRINTER.w - 8}" height="${PLATE_Y - PRINTER.y - 4}"/></clipPath>`
   ground += at(BOARD.x, BOARD.y, tokenChart(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
   ground += employeeFrame(world.tokens, now, detail)
-  // the vat lives in the dark: its glow and bubbles are drawn only when a drop will open the hatch
-  const dropping = subs.some((r) => {
-    const p = phaseOf(r, floors)
-    return !!p && p.splashAt !== null && p.splashAt + HATCH_HOLD_MS > now
-  })
-  if (dropping) ground += vatLife(detail)
+  ground += at(HOLE_X - 23, MELT_Y - 4, meltLife(detail))
   for (const r of subs) {
     const p = phaseOf(r, floors)
     if (p && p.feedEnd > now) ground += feedSvg(r.spawnedAt, p.feedEnd, sec, detail)
@@ -2369,13 +2420,17 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     const kit = new Px(KIT.w, KIT.h)
     deskProp(kit, role)
     const props = at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, kit.svg())
-    const working =
-      props +
-      at(p.seat.monX, p.seat.monY, screenOn) +
-      at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) +
-      mark +
-      cloudOf(workKind, r.status === 'working' ? r.activity.label : '')
-    out += during(sec(p.arriveAt), p.workEnd === null ? null : sec(p.workEnd), working)
+    const desk = props + at(p.seat.monX, p.seat.monY, screenOn)
+    const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) + mark + cloudOf(workKind, r.status === 'working' ? r.activity.label : '')
+    const until = p.workEnd === null ? null : sec(p.workEnd)
+    // a compaction at its desk: it gets up, hops and sheds bolts, then sits down again
+    const c = r.compactedAt
+    const shedAt = c !== undefined && c >= p.arriveAt && c + SHED_MS > now && (p.workEnd === null || c + SHED_MS <= p.workEnd) ? c : null
+    if (shedAt === null) out += during(sec(p.arriveAt), until, desk + sitter)
+    else {
+      out += during(sec(p.arriveAt), until, desk) + during(sec(p.arriveAt), sec(shedAt), sitter) + during(sec(shedAt + SHED_MS), until, sitter)
+      out += shedSvg(role, true, girthOf(r.compactedFrom ?? r.context), p.seat.x, p.seat.floorY, shedAt, sec, detail)
+    }
     if (p.workEnd !== null && p.leaveAt !== null && p.handAt !== null && p.toHoleAt !== null && p.jumpAt !== null && p.splashAt !== null && p.goneAt !== null) {
       const endKind: ActivityKind = r.status === 'failed' ? 'error' : 'done'
       // a cheer at the desk
@@ -2405,7 +2460,7 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const opened = p.jumpAt - HATCH_LEAD_MS
       const shut = p.splashAt + HATCH_HOLD_MS
       const open = new Px(HOLE_W + 2, 8)
-      R(open, '#15101c', 1, 0, HOLE_W, 8)
+      R(open, CELLAR, 1, 0, HOLE_W, 8)
       R(open, '#4a4f70', 0, 0, 2, 7)
       R(open, '#4a4f70', HOLE_W, 0, 2, 7)
       out += during(sec(opened), sec(shut), at(HOLE_X0 - 1, groundY, open.svg()))
@@ -2428,8 +2483,13 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     }
   }
 
-  // the pit stays dark until a hatch lets the light in
-  out += at(0, gy, pitSvg(drops, sec, detail))
+  // daylight falls into the cellar while a hatch is open, and each splash leaves the pipe's joint weeping
+  out += at(0, gy, hatchLight(drops, sec, detail))
+  if (detail < 2)
+    for (const r of subs) {
+      const splash = phaseOf(r, floors)?.splashAt ?? null
+      if (splash !== null && splash + LEAK_MS > now) out += at(0, gy, during(sec(splash + 250), sec(splash + LEAK_MS), cached(`leak:${detail}`, () => leakSvg(detail))))
+    }
 
   // the main robot and its cloud
   if (main) {
@@ -2439,7 +2499,8 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       const p = phaseOf(r, floors)
       return !!p && (p.goneAt === null || p.goneAt > now)
     })
-    const asleep = kind === 'idle' && !helpers
+    const shedAt = main.compactedAt !== undefined && main.compactedAt + SHED_MS > now ? main.compactedAt : null
+    const asleep = kind === 'idle' && !helpers && shedAt === null
     const look = lookFor(kind === 'idle' && helpers ? 'think' : kind, true)
     // with nothing to type, the boss has its stick in its hand; otherwise the stick leans on the chair
     const inHand = look.pose === 'sit' && !asleep
@@ -2448,7 +2509,10 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
       for (let i = 0; i < 13; i++) R(stick, C.woodL, i >> 2, 12 - i, 1, 1)
       out += at(MAIN_X - 14, gy + FY - 13, stick.svg())
     }
-    out += at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand))
+    const seatedMain = at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand))
+    // a compaction: the main agent gets up from its chair, hops and sheds bolts like anyone else
+    if (shedAt === null) out += seatedMain
+    else out += during(null, sec(shedAt), seatedMain) + during(sec(shedAt + SHED_MS), null, seatedMain) + shedSvg('main', false, girthOf(main.compactedFrom ?? main.context), MAIN_X, gy + FY, shedAt, sec, detail)
     if (main.id === selected) out += selectMark(MAIN_X, gy + SEAT_Y - 24)
     if (kind === 'idle' && helpers) {
       const busy = subs.filter((r) => r.status === 'working').length
@@ -2497,6 +2561,36 @@ export function layPicture(l: Layers, key: string, svg: string, height: number, 
   // the upper layer is on show: the new picture goes under it, and is uncovered once it has loaded
   return { ...l, key, lower: svg, uncoverAt: now + UNCOVER_MS }
 }
+
+/* ---------- click layers, and which task is open ---------- */
+/**
+ * The app gives up on a click layer that does not answer it in time, and shows its own notice in
+ * the layer's place. Such a layer is left out of the drawing (its card gets a plain button), then
+ * laid afresh under a new name: soon when the person is at the pane, and after a longer wait each
+ * time it fails again.
+ */
+export type ClickLayer = { gen: number; failedAt: number; fails: number }
+const MEND_MS = [1500, 5000, 15_000, 60_000]
+/** How long a failed click layer is left out before it is tried again. */
+export const mendWait = (fails: number, focused: boolean) => (focused ? MEND_MS[0]! : MEND_MS[Math.min(Math.max(fails, 1), MEND_MS.length) - 1]!)
+/** The name to lay a click layer under now, or null while it is left out; and its record from here on. */
+export function layClick(l: ClickLayer | undefined, name: string, now: number, focused: boolean): { key: string | null; next: ClickLayer | undefined } {
+  if (!l) return { key: name, next: l }
+  if (l.failedAt) {
+    if (now - l.failedAt < mendWait(l.fails, focused)) return { key: null, next: l }
+    const next = { ...l, gen: l.gen + 1, failedAt: 0 }
+    return { key: `${name}~${next.gen}`, next }
+  }
+  return { key: l.gen ? `${name}~${l.gen}` : name, next: l }
+}
+/** A click layer's record once the app has given up on it. */
+export const failClick = (l: ClickLayer | undefined, now: number): ClickLayer => ({ gen: l?.gen ?? 0, failedAt: now, fails: (l?.fails ?? 0) + 1 })
+
+/**
+ * Which task card is open: the one last picked in the pane, unless an agent has been opened from
+ * Claude Code's own tasks list since. A click on the open card always closes it.
+ */
+export const openCard = (picked: string, pickedAt: number, viewed: { id: string; at: number }) => (viewed.id && viewed.at > pickedAt ? viewed.id : picked)
 
 export type TaskState = 'running' | 'waiting' | 'done' | 'failed' | 'idle'
 

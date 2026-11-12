@@ -39,6 +39,10 @@ export type Robot = {
   turnStartedAt?: number
   /** Tokens in its context window as of its latest model request. */
   context?: number
+  /** When its context was last compacted: it gets up, hops and sheds bolts. */
+  compactedAt?: number
+  /** What it carried before that compaction, so it hops as heavy as it was. */
+  compactedFrom?: number
   status: RobotStatus
   /** When the printer starts on it: robots ordered together are printed one after another. */
   spawnedAt: number

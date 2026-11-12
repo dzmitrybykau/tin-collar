@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, fit, floorsFor, girthOf, hasStoodUp, KIT, layPicture, noLayers, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, skyKey, transitionsOf } from '../hooks/scene'
+import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MS, skyKey, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -193,7 +193,7 @@ test('a finished robot hands in its report, then drops into the vat', async () =
   expect(positionOf(robot, 0, p.goneAt! + 10)).toBeNull()
 })
 
-test('the pit is dark, and the vat shows only for a drop through the hatch', async () => {
+test('the cellar is dark and has no walls: daylight falls in only while the hatch stands open', async () => {
   const main: Robot = {
     id: 'main', type: 'main', description: 'Main', status: 'working', spawnedAt: -99_999, seat: -1,
     activity: { kind: 'think', label: '', since: 0 }, calls: 0, errors: 0,
@@ -204,10 +204,15 @@ test('the pit is dark, and the vat shows only for a drop through the hatch', asy
   }
   const p = phaseOf(leaver, 1)!
   const scene = (robots: Robot[], now: number) => buildScene({ home: 'Office', floors: 1, robots, steps: {} }, now)
-  const vatGlow = 'id="melt"'
-  expect(scene([main], 0)).not.toContain(vatGlow)
-  expect(scene([main, leaver], p.jumpAt! - 500)).toContain(vatGlow)
-  expect(scene([main, leaver], p.goneAt! + 500)).not.toContain(vatGlow)
+  const rays = 'data-what="rays"'
+  expect(scene([main], 0)).not.toContain(rays)
+  expect(scene([main, leaver], p.jumpAt! - 500)).toContain(rays)
+  expect(scene([main, leaver], p.goneAt! + 500)).not.toContain(rays)
+  // a splash leaves the joint between the pipe and the ladle weeping for a few seconds
+  const leak = 'data-what="leak"'
+  expect(scene([main], 0)).not.toContain(leak)
+  expect(scene([main, leaver], p.splashAt! + 1000)).toContain(leak)
+  expect(scene([main, leaver], p.splashAt! + LEAK_MS + 100)).not.toContain(leak)
 })
 
 test('a new robot collects its blueprint from the main agent before it sits down', async () => {
@@ -448,4 +453,71 @@ test("the main agent's cloud is as big as what it has to say", () => {
   // a tick alone needs the least; a long label never makes a cloud wider than the full one
   expect(cloudSize('done', '')[0]).toBeLessThan(thinkW)
   for (const kind of ['think', 'done', 'error', 'ask', 'talk'] as const) expect(cloudSize(kind, 'a very long label that goes on and on and on')[0]).toBeLessThanOrEqual(full)
+})
+
+
+test('at a compaction a robot gets up, hops and sheds bolts, and so does the main agent', () => {
+  const main: Robot = { id: 'main', type: 'main', description: 'Main', status: 'working', spawnedAt: -99_999, seat: -1, activity: { kind: 'write', label: 'a.ts', since: 0 }, calls: 0, errors: 0 }
+  const sitter = helper('a1', 2, -60_000)
+  const scene = (robots: Robot[], now: number) => buildScene({ home: 'Office', floors: 1, robots, steps: {} }, now)
+  const shed = 'data-what="shed"'
+  expect(scene([main, sitter], 0)).not.toContain(shed)
+  expect(scene([main, { ...sitter, compactedAt: 0 }], 100)).toContain(shed)
+  expect(scene([{ ...main, compactedAt: 0 }, sitter], 100)).toContain(shed)
+  // once the bolts are swept up it sits as before
+  expect(scene([main, { ...sitter, compactedAt: 0 }], SHED_MS + 100)).not.toContain(shed)
+  expect(scene([{ ...main, compactedAt: 0 }, sitter], SHED_MS + 100)).not.toContain(shed)
+})
+
+test('a click layer the app gave up on is left out, then laid afresh under a new name', () => {
+  // a layer nothing has happened to keeps its name
+  expect(layClick(undefined, 'card-a1', 0, false).key).toBe('card-a1')
+  // failed, it is left out: the card shows a plain button instead of the app's notice
+  const failed = failClick(undefined, 1000)
+  expect(layClick(failed, 'card-a1', 1200, false).key).toBeNull()
+  expect(layClick(failed, 'card-a1', 1200, true).key).toBeNull()
+  // it comes back under a new name, so the app starts it anew
+  const back = layClick(failed, 'card-a1', 1000 + mendWait(1, false), false)
+  expect(back.key).toBe('card-a1~1')
+  expect(layClick(back.next, 'card-a1', 99_000, false).key).toBe('card-a1~1')
+  // each failure waits longer, but never when the person is at the pane
+  const again = failClick(back.next, 10_000)
+  expect(mendWait(again.fails, false)).toBeGreaterThan(mendWait(1, false))
+  expect(layClick(again, 'card-a1', 10_000 + mendWait(1, false), false).key).toBeNull()
+  expect(layClick(again, 'card-a1', 10_000 + mendWait(1, false), true).key).toBe('card-a1~2')
+})
+
+test('a click on the open card closes it, however it was opened', async ($, on) => {
+  // opened from the tasks list, then picked here: the pick wins, and an empty pick means closed
+  expect(openCard('', 0, { id: 'a1', at: 10 })).toBe('a1')
+  expect(openCard('', 20, { id: 'a1', at: 10 })).toBe('')
+  expect(openCard('main', 20, { id: 'a1', at: 10 })).toBe('main')
+  expect(openCard('main', 20, { id: 'a2', at: 30 })).toBe('a2')
+
+  engine(on)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'terminal', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, view: { agentId: 'a1' } } })
+  expect(await ui.find({ type: 'Text', text: /started/ })).toBeDefined()
+  await ui.press({ key: 'card-a1' })
+  expect(await ui.find({ type: 'Text', text: /started/ })).toBeUndefined()
+  await ui.press({ key: 'card-a1' })
+  expect(await ui.find({ type: 'Text', text: /started/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test("when Claude compacts an agent's context, its robot is told to shed its bolts", async ($, on) => {
+  engine(on)
+  const kept = [{ role: 'user', text: 'Summary of the work so far', toolUses: [] }]
+  on('session.compact', () => ({ messages: kept, tokensBefore: 180_000, tokensAfter: 20_000 }) as never)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /context/ })).toBeUndefined()
+  await $.session.compact({ trigger: 'manual', messages: kept } as unknown as Parameters<typeof $.session.compact>[0])
+  // it sits down as light as its context now is
+  expect(await ui.find({ type: 'Text', text: /^20k context$/i })).toBeDefined()
+  // one worked out ahead of time changes nothing
+  await $.session.compact({ trigger: 'precompute', messages: kept } as unknown as Parameters<typeof $.session.compact>[0])
+  expect(await ui.find({ type: 'Text', text: /^20k context$/i })).toBeDefined()
+  await ui.unmount()
 })

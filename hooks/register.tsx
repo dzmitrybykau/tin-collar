@@ -5,8 +5,8 @@ import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'cl
 
 import type { Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, floorsFor, girthOf, hasStoodUp, hitTest, layPicture, MAX_FLOORS, noLayers, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, skyKey, transitionsOf, W } from './scene'
-import type { Layers, Progress, TaskState } from './scene'
+import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MS, skyKey, transitionsOf, W } from './scene'
+import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
 const STEPS_KEPT = 60
@@ -277,7 +277,7 @@ const visualKey = (d: Display, now: number) =>
     chartRows(dailyTotals(d.tokens, d.history, now, CHART_DAYS)),
     // the window follows the hour of the picture's own moment
     skyKey(d.at),
-    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context)]),
+    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactedAt ?? 0, r.compactedAt !== undefined && now - r.compactedAt < SHED_MS]),
   ])
 const structureKey = (d: Display, now: number) =>
   JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt])])
@@ -371,9 +371,13 @@ async function publish($: EngineInterface, fresh = false) {
   await update($, display, () => next)
 }
 
-/* The click layers over the picture and the cards: how many times they have been laid afresh. */
-let hits = { laid: 0, focused: false }
+/* The click layers over the picture and the cards, by name: the ones the app has given up on, and when to lay them afresh. */
+let clicks = new Map<string, ClickLayer>()
+let mendAskedAt = 0
 const HIT_PROPS = { version: 2 } as const
+/* Which task card is open: when one was last picked here, and the agent last opened from the tasks list. */
+let pickedAt = 0
+let viewed = { id: '', at: 0 }
 
 /* When the picture's clock starts: when its display was taken, or when the pane was resized. */
 let pictureClock = { displayAt: -1, drawnAt: 0, columns: -1 }
@@ -503,7 +507,10 @@ async function lastWords($: EngineInterface, id: string): Promise<string> {
 }
 
 async function choose($: EngineInterface, id: string) {
-  await update($, selected, (cur) => (cur === id ? '' : id))
+  // what is open is what the pane shows, so a click on the open card closes it
+  const open = openCard(await read($, selected), pickedAt, viewed)
+  pickedAt = Date.now()
+  await update($, selected, () => (open === id ? '' : id))
   // a click is answered at once
   await publish($, true)
 }
@@ -519,8 +526,15 @@ export const register: Register = (on) => {
       await $.ui.open({ id: PANE, title: 'Office' })
       $.clock.every(PUBLISH_EVERY_MS, () => void publish($).catch(() => {}))
       // an upper picture layer that is due to come off has the pane drawn again
+      // and so does a click layer that is due to be laid afresh
       $.clock.every(100, () => {
-        if (laid.uncoverAt && Date.now() >= laid.uncoverAt) void update($, redraw, (n) => n + 1).catch(() => {})
+        const t = Date.now()
+        let due = laid.uncoverAt > 0 && t >= laid.uncoverAt
+        if (!due && t - mendAskedAt > 1000 && [...clicks.values()].some((l) => l.failedAt && t - l.failedAt >= mendWait(l.fails, false))) {
+          mendAskedAt = t
+          due = true
+        }
+        if (due) void update($, redraw, (n) => n + 1).catch(() => {})
       })
       $.clock.every(HISTORY_EVERY_MS, () => void loadHistory($).catch(() => {}))
       void loadHistory($).catch(() => {})
@@ -667,6 +681,45 @@ export const register: Register = (on) => {
     return res
   })
 
+  // A compaction: while it runs, the robot's cloud says so; once it is done, the robot gets up,
+  // hops and sheds bolts, and sits down as light as its context now is.
+  on('session.compact', async ($, e, next) => {
+    const id = e.agentId ?? 'main'
+    // one worked out ahead of time changes nothing yet
+    const real = e.trigger !== 'precompute'
+    // a compaction of a transcript that has no robot (one of the engine's own forks) prints none
+    const mark = (w: World, fn: (r: Robot) => Robot): World => (w.robots.some((r) => r.id === id) ? { ...w, robots: w.robots.map((r) => (r.id === id ? fn(r) : r)) } : w)
+    let before: Activity | undefined
+    if (real) {
+      try {
+        const now = Date.now()
+        await update($, world, (w) =>
+          mark(id === 'main' ? ensure(w, id, now) : w, (r) => {
+            before = r.activity
+            return { ...r, activity: { kind: 'think', label: 'COMPACTING', since: now } }
+          }),
+        )
+      } catch {}
+    }
+    const res = await next(e)
+    if (real) {
+      try {
+        const now = Date.now()
+        const done = !('skip' in res)
+        const lighter = 'tokensAfter' in res ? res.tokensAfter : undefined
+        await update($, world, (w) =>
+          mark(w, (r) => ({
+            ...r,
+            activity: r.activity.label === 'COMPACTING' && before ? { ...before, since: now } : r.activity,
+            ...(done ? { compactedAt: now, compactedFrom: r.context, context: lighter ?? r.context } : {}),
+          })),
+        )
+        await publish($, true)
+      } catch {}
+    }
+    return res
+  })
+
   on('classic.PermissionRequest', async ($, e, next) => {
     try {
       const now = Date.now()
@@ -699,6 +752,9 @@ export const register: Register = (on) => {
     // a layer's name without the count of times it has been laid afresh
     const element = e.element.replace(/~\d+$/, '')
     const now = Date.now()
+    // a layer that reports a click is in working order
+    const worked = clicks.get(element)
+    if (worked && worked.fails) clicks.set(element, { ...worked, fails: 0 })
     if (lastPress.element === element && now - lastPress.at < 350) return {}
     lastPress = { element, at: now }
     if (element.startsWith('card-')) {
@@ -718,6 +774,16 @@ export const register: Register = (on) => {
       if (id) await choose($, id)
     } catch {}
     return {}
+  })
+
+  // The app has given up on a click layer: it is left out of the next drawing and laid afresh later.
+  on('ui.fault', async ($, e, next) => {
+    try {
+      const name = e.element.replace(/~\d+$/, '')
+      clicks.set(name, failClick(clicks.get(name), Date.now()))
+      $.ui.log(`click layer ${e.element}: ${e.phase}: ${e.reason}`, { to: 'debug' })
+    } catch {}
+    return next(e)
   })
 
   // Each helper's row in the chat carries the same robot that works in the office.
@@ -748,15 +814,18 @@ export const register: Register = (on) => {
     const shownNow = await read($, display)
     const picked = await read($, selected)
     const now = Date.now()
-    // Opening an agent from Claude Code's own tasks list opens its task here too.
-    const sel = picked || e.props.view.agentId || ''
+    // Opening an agent from Claude Code's own tasks list opens its task here too, until the next click here.
+    const viewId = e.props.view.agentId ?? ''
+    if (viewId !== viewed.id) viewed = { id: viewId, at: now }
+    const sel = openCard(picked, pickedAt, viewed)
     const Svg = e.surface !== 'terminal' ? ($.ui.resolve(e) as ElementTable<'vscode'>).Svg : null
     const Client = e.surface === 'desktop' ? ($.ui.resolve(e) as ElementTable<'desktop'>).Client : null
-    // A click layer the app has given up on shows the app's own notice in its place. Laying the
-    // layers afresh when the pane takes the focus clears it: the click that finds one broken mends it.
-    if (e.props.isFocused && !hits.focused) hits = { laid: hits.laid + 1, focused: true }
-    else if (!e.props.isFocused && hits.focused) hits = { ...hits, focused: false }
-    const layer = (name: string) => (hits.laid ? `${name}~${hits.laid}` : name)
+    // A click layer the app has given up on is left out, then laid afresh under a new name when it is due.
+    const layer = (name: string): string | null => {
+      const { key, next } = layClick(clicks.get(name), name, now, e.props.isFocused)
+      if (next) clicks.set(name, next)
+      return key
+    }
 
     const robots = w.robots
       .filter((r) => r.type === 'main' || r.endedAt === undefined || now - r.endedAt < LIST_KEEP_MS)
@@ -862,11 +931,13 @@ export const register: Register = (on) => {
           {Svg ? <Svg source={progressSvg(progress.bar, role.id, 320)} alt={progress.label} /> : null}
         </Box>
       )
-      const clickable = Client ? (
+      // without a working click layer the card has a plain button to open it by
+      const cardKey = Client ? layer(`card-${r.id}`) : null
+      const clickable = Client && cardKey ? (
         <Box position="relative" flexDirection="column">
           {face}
           <Box position="absolute" top={0} left={0} width="100%" height="100%">
-            <Client key={layer(`card-${r.id}`)} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
+            <Client key={cardKey} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
           </Box>
         </Box>
       ) : (
@@ -910,15 +981,18 @@ export const register: Register = (on) => {
     const layers = pictureLayers(shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now), e.props.bodyColumns, now, !!Client)
     const alt = `Tin Collar office: ${robots.map((r) => `${robotName(r)} ${stateWord(r)}`).join(', ')}`
     const picture = <Svg source={layers.lower} alt={alt} />
+    const hitKey = Client ? layer('hit') : null
     const room = Client ? (
       <Box position="relative">
         {picture}
         <Box key="over" position="absolute" top={0} left={0} width="100%" height="100%" display={layers.covered ? 'flex' : 'none'}>
           <Svg source={layers.upper} alt={alt} />
         </Box>
-        <Box position="absolute" top={0} left={0} width="100%" height="100%">
-          <Client key={layer('hit')} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
-        </Box>
+        {hitKey ? (
+          <Box position="absolute" top={0} left={0} width="100%" height="100%">
+            <Client key={hitKey} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
+          </Box>
+        ) : null}
       </Box>
     ) : (
       picture

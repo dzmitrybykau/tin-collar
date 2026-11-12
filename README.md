@@ -6,12 +6,12 @@
 </p>
 
 <p align="center">
-  <img src="docs/tin-collar.gif" width="768" alt="A pixel office: a robot is 3D-printed, collects a blueprint from the main agent and walks to its desk; another hands in its report and drops through a hatch into a vat of molten metal">
+  <img src="docs/tin-collar.gif" width="768" alt="A pixel office: a robot is 3D-printed, collects a blueprint from the main agent and walks to its desk; another hands in its report and drops through a hatch into a ladle of molten metal in the cellar">
 </p>
 
 <p align="center"><sub>
-  A designer is printed and briefed. The writer hands in its report and takes the hatch.<br>
-  The metal goes back up the pipe and comes out of the printer as an architect.
+  A designer is printed and briefed. The tester's context is compacted: it hops and sheds its bolts.<br>
+  The writer hands in its report and takes the hatch; the metal comes back out of the printer as an architect.
 </sub></p>
 
 ## What it does
@@ -20,9 +20,9 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 
 - **The main agent** runs the office from a leather chair at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for. With nothing to type, it taps its stick on the desk.
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
-- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a vat of molten metal. A pipe takes the metal back to the printer, where it becomes the next robot.
+- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a ladle of molten metal in the dark cellar. Daylight follows it down, the splash leaves the pipe's joint weeping for a moment, and the pipe takes the metal back to the printer, where it becomes the next robot.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
-- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens.
+- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. When Claude compacts it, the robot gets up, hops and sheds a few bolts, then sits down slimmer. The main agent does the same.
 - **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. While its helpers work, an idle main agent takes a coffee break; in an empty office it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
 
 <p align="center">

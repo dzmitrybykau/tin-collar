@@ -88,7 +88,7 @@ export type World = {
   history?: Record<string, number>
 }
 
-/** What the picture shows: the world, held and batched so the picture changes rarely. */
+/** What the room's picture shows: the world, held and batched so the picture changes rarely. */
 export type Display = {
   at: number
   home: string
@@ -99,11 +99,33 @@ export type Display = {
   history?: Record<string, number>
 }
 
+/** One journey a robot makes across the office, drawn once in a picture of its own and left alone until it is over. */
+export type Act = {
+  /** Which journey: the robot, the way it goes, and the facts it was laid from. */
+  key: string
+  /** Which of the pane's journey layers holds it. */
+  slot: number
+  kind: 'in' | 'out'
+  /** When its picture's clock started. */
+  at: number
+  /** When its picture can be taken away. */
+  until: number
+  floors: number
+  /** When the printer's plate is its own. */
+  plateFrom: number
+  /** The robot as it was when the journey was laid: it plays out as laid. */
+  robot: Robot
+}
+
+/** The journeys on show: what is queued for the animation and has been laid. */
+export type Stage = { acts: Act[] }
+
 declare module 'claude-code' {
   interface PluginState {
     'tin-collar': {
       world: Shaped<World>
       display: Shaped<Display>
+      stage: Shaped<Stage>
       selected: string
       /** Counts up to have the pane drawn again when a picture layer is due to come off. */
       redraw: number

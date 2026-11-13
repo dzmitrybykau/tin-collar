@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { bot, buildScene, CAPACITY, chartRows, cloudSize, deskProp, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, transitionsOf } from '../hooks/scene'
+import { ARRIVAL_KEPT_MS, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartRows, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -358,16 +358,15 @@ test('a finished robot given more work carries on at its desk, or is printed aga
   expect(hasStoodUp(helper('a2', 0, 0), 0, 99_999)).toBe(false)
 })
 
-test('a new picture is never laid in the layer that is on show', () => {
-  // An image given a new picture shows the old one from its start until the new one loads,
-  // which throws every robot back to where it stood when that picture was drawn.
+test('a new picture of the room is never laid in the layer that is on show', () => {
+  // A frame given a new picture is empty until it has loaded, so the picture on show stays until then.
   let now = 0
   let l = layPicture(noLayers, 'p1', 'pic1', 184, now, true)
   expect(l.lower).toBe('pic1')
   expect(l.covered).toBe(false)
   for (let n = 2; n <= 7; n++) {
-    now += 400
-    const before = layPicture(l, l.key, '', l.height, now, true)
+    now += 700
+    const before = layPicture(l, l.key, '', 184, now, true)
     const onShow = before.covered ? 'upper' : 'lower'
     const after = layPicture(before, `p${n}`, `pic${n}`, 184, now, true)
     expect(after[onShow]).toBe(before[onShow])
@@ -379,14 +378,117 @@ test('a new picture is never laid in the layer that is on show', () => {
   expect(under.covered).toBe(true)
   expect(under.lower).toBe('C')
   expect(layPicture(under, 'c', 'C', 184, 900, true).covered).toBe(true)
-  expect(layPicture(under, 'c', 'C', 184, 1200, true).covered).toBe(false)
-  // a building that has grown a floor, and a surface with one layer, are laid plainly
-  const grown = layPicture(under, 'd', 'D', 240, 1300, true)
-  expect(grown.lower).toBe('D')
-  expect(grown.covered).toBe(false)
+  expect(layPicture(under, 'c', 'C', 184, 1500, true).covered).toBe(false)
+  // a building that has grown a floor is laid like any other picture: each layer keeps its own height
+  const grown = layPicture(under, 'd', 'D', 240, 1500, true)
+  expect(grown.lower).toBe('C')
+  expect(grown.lowerHeight).toBe(184)
+  expect(grown.upper).toBe('D')
+  expect(grown.upperHeight).toBe(240)
+  expect(grown.covered).toBe(true)
+  // a surface with one layer is laid plainly
   const single = layPicture(layPicture(noLayers, 'a', 'A', 184, 0, false), 'b', 'B', 184, 400, false)
   expect(single.lower).toBe('B')
   expect(single.covered).toBe(false)
+})
+
+/* ---------- journeys: each is laid once and plays to its end ---------- */
+test('each journey is laid once, in a layer of its own, and is left alone until it is over', () => {
+  const now = 100_000
+  let robots: Robot[] = [helper('main', -1, 0, { type: 'main' })]
+  for (const id of ['a1', 'a2', 'a3']) {
+    const slot = printSlot(robots, 1, now)
+    robots = [...robots, helper(id, robots.length - 1, slot.at, { rush: slot.rush, role: 'coder' })]
+  }
+  const who = (acts: ReturnType<typeof directJourneys>) => acts.map((a) => a.key.split(':').slice(0, 2).join(':'))
+  // ordered together, they are not laid together: a journey is laid shortly before it starts
+  let acts = directJourneys([], robots, 1, now, 14)
+  expect(who(acts)).toEqual(['in:a1'])
+  const first = acts[0]!
+  // with nothing new the very same list comes back, so nothing is drawn again
+  expect(directJourneys(acts, robots, 1, now + 200, 14)).toBe(acts)
+  // the next one is laid when its turn at the printer is near, in the next free layer
+  const near = robots[2]!.spawnedAt - JOURNEY_LEAD_MS + 10
+  acts = directJourneys(acts, robots, 1, near, 14)
+  expect(who(acts)).toEqual(['in:a1', 'in:a2'])
+  expect(acts.map((a) => a.slot)).toEqual([0, 1])
+  // whatever happens to a robot meanwhile, its journey stays as it was laid
+  const busy = robots.map((r): Robot => (r.id === 'a1' ? { ...r, context: 90_000, activity: { kind: 'write', label: 'a.ts', since: near } } : r))
+  expect(directJourneys(acts, busy, 1, near + 100, 14)[0]).toBe(first)
+  // over, it is taken away for good: it is not laid a second time
+  const over = phaseOf(robots[1]!, 1)!.arriveAt + ARRIVAL_KEPT_MS + 10
+  const later = directJourneys(acts, robots, 1, over, 14)
+  expect(later.some((a) => a.key === first.key)).toBe(false)
+  expect(directJourneys(later, robots, 1, over + 5000, 14).some((a) => a.key === first.key)).toBe(false)
+  // with every layer taken a journey waits for one
+  expect(directJourneys([], robots, 1, near, 1).length).toBe(1)
+})
+
+test('a finished robot keeps still at its desk until the picture of its leaving has it, and stays if given more work', () => {
+  const done = helper('a1', 0, 0, { status: 'done', endedAt: 60_000, role: 'coder' })
+  const p = phaseOf(done, 0)!
+  // it does not stand up the moment it is done: its leaving is laid first
+  expect(p.workEnd!).toBeGreaterThan(60_000 + JOURNEY_LEAD_MS)
+  const acts = directJourneys([], [done], 0, 60_500, 14)
+  expect(acts.map((a) => a.kind)).toEqual(['out'])
+  // the room draws it still, then lets go of it, before it cheers in its own picture
+  const stay = stayOf(p)
+  expect(stay.still!).toBeLessThan(stay.until!)
+  expect(stay.until!).toBeLessThan(p.workEnd!)
+  // given more work before it stood up, it stays, and its leaving is taken away
+  const back: Robot = { ...done, status: 'working', endedAt: undefined }
+  expect(directJourneys(acts, [back], 0, 60_800, 14)[0]!.until).toBeLessThan(62_000)
+  // once it is on its way out, the journey plays to its end whatever comes
+  expect(directJourneys(acts, [back], 0, p.leaveAt! + 500, 14)[0]).toBe(acts[0])
+})
+
+test('no picture is longer than the app will draw, however many helpers are ordered at once', () => {
+  const now = 200_000
+  const robots: Robot[] = [helper('main', -1, 0, { type: 'main' })]
+  let floors = 0
+  for (let i = 0; i < CAPACITY; i++) {
+    const slot = printSlot(robots, floors, now)
+    floors = Math.max(floors, floorsFor(i))
+    robots.push(helper(`a${i}`, i, slot.at, { rush: slot.rush, role: ROLE_IDS[1 + (i % 8)], activity: { kind: 'read', label: 'scene.ts', since: now } }))
+  }
+  const world = { home: 'Office', floors, robots, steps: {} }
+  // a picture too long is not drawn at all, and whatever it refers to must be in it
+  const whole = (svg: string) => {
+    expect(svg.length).toBeLessThanOrEqual(131_072)
+    for (const m of svg.matchAll(/href="#([^"]+)"/g)) expect(svg).toContain(`id="${m[1]}"`)
+  }
+  for (const t of [now, now + 20_000, now + 120_000]) whole(buildRoom(world, t))
+  for (const r of robots.slice(1, 9)) whole(buildJourney({ kind: 'in', robot: r, floors, plateFrom: r.spawnedAt }, r.spawnedAt))
+  const leaver: Robot = { ...robots[9]!, status: 'done', endedAt: now + 130_000 }
+  whole(buildJourney({ kind: 'out', robot: leaver, floors, plateFrom: 0 }, now + 130_000))
+  // the room holds nobody who is on the way: a robot's walk is in the picture of its journey alone
+  const walking = phaseOf(robots[1]!, floors)!.briefEnd + 300
+  expect(buildRoom(world, walking)).not.toContain('animateTransform')
+  expect(buildJourney({ kind: 'in', robot: robots[1]!, floors, plateFrom: 0 }, walking)).toContain('animateTransform')
+  // and one picture of everything still tells the whole story, for a still
+  expect(buildScene({ ...world, robots: robots.slice(0, 3) }, walking)).toContain('data-what="arrival"')
+})
+
+test("a robot's journey is a picture of its own in the pane, and redrawing the pane does not touch it", async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  type Drawn = { type?: string; props?: Record<string, unknown> }
+  const pictureIn = async (key: string) => ((await ui.find({ key }))?.children ?? []).map((c) => c as Drawn).find((c) => c?.type === 'Svg')?.props
+  const journey = await pictureIn('journey-0')
+  // a frame: the app keeps it playing for as long as its source stays the same
+  expect(journey?.isInteractive).toBe(true)
+  expect(String(journey?.source)).toContain('data-what="arrival"')
+  const room = await pictureIn('under')
+  expect(room?.isInteractive).toBe(true)
+  expect(String(room?.source)).not.toContain('data-what="arrival"')
+  // every tool call redraws the pane: the journey's picture is the very same afterwards
+  await $.tool.call({ tool: 'Grep', pattern: 'router', agentId: 'a1' })
+  await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/auth.ts' })
+  await ui.redraw()
+  expect((await pictureIn('journey-0'))?.source).toBe(journey?.source)
+  await ui.unmount()
 })
 
 test('a label too long for its bubble is cut on a whole word and says so', () => {

@@ -1,6 +1,6 @@
 // The building: pixel art drawn into small framebuffers, written out as SVG with
 // SMIL loops. Nothing here touches `$`, so it also runs under plain Node.
-import type { ActivityKind, PlanStatus, Robot, TokenTally, World } from '../types'
+import type { Act, ActivityKind, PlanStatus, Robot, TokenTally, World } from '../types'
 import { champion, dailyTotals, formatTokens } from './tally'
 
 export const W = 256
@@ -21,6 +21,8 @@ const REPORT_SLOT_MS = 1600
 const WALK_PX_PER_S = 90
 const LIFT_PX_PER_S = 120
 const MIN_WORK_MS = 2500
+// a finished robot stays at its desk a moment longer: the picture of its leaving is laid before it stands up
+const REPORT_READY_MS = 2200
 const CHEER_MS = 900
 const BRIEF_MS = 1100
 const HANDOFF_MS = 1000
@@ -1171,6 +1173,8 @@ export type Seat = {
 
 /** A desk's place, in building coordinates (below the roof). */
 export function seatFor(seat: number, floors: number): Seat | null {
+  // the main agent has no desk of this kind
+  if (seat < 0) return null
   const gy = floors * FLOOR_H
   if (seat < GROUND_SEATS) {
     const d = GROUND_DESKS[seat]!
@@ -1847,13 +1851,17 @@ function printerBeacon(on: boolean, detail: Detail): string {
 /* ---------- SVG and SMIL ---------- */
 const s2 = (n: number) => (Math.round(n * 100) / 100).toString()
 
-/** How much the drawing may animate: 0 full, 1 single frames, 2 also no subagent clouds. */
-type Detail = 0 | 1 | 2
+/** How much the drawing may animate: 0 full, 1 single frames, 2 also no subagent clouds, 3 also bare desks. */
+type Detail = 0 | 1 | 2 | 3
+
+/* The moment the picture being drawn starts at. Loops are timed from the clock, not from the picture, so a new picture carries them on where the old one was. */
+let loopAt = 0
 
 /** Frames that take turns, each shown for its own number of seconds, looping. */
 function cycle(frames: string[], durs: number[]): string {
   if (frames.length === 1) return frames[0]!
   const total = durs.reduce((a, b) => a + b, 0)
+  const begin = s2(-(loopAt % Math.max(1, Math.round(total * 1000))) / 1000)
   let acc = 0
   let out = ''
   frames.forEach((f, i) => {
@@ -1872,7 +1880,7 @@ function cycle(frames: string[], durs: number[]): string {
       values = 'hidden;visible;hidden'
       keys = `0;${k0.toFixed(4)};${k1.toFixed(4)}`
     }
-    out += `<g visibility="${i === 0 ? 'visible' : 'hidden'}"><animate attributeName="visibility" values="${values}" keyTimes="${keys}" dur="${s2(total)}s" calcMode="discrete" repeatCount="indefinite"/>${f}</g>`
+    out += `<g visibility="${i === 0 ? 'visible' : 'hidden'}"><animate attributeName="visibility" values="${values}" keyTimes="${keys}" dur="${s2(total)}s" begin="${begin}s" calcMode="discrete" repeatCount="indefinite"/>${f}</g>`
   })
   return out
 }
@@ -1889,6 +1897,28 @@ function during(t0: number | null, t1: number | null, inner: string): string {
 }
 const at = (x: number, y: number, inner: string) => `<g transform="translate(${x} ${y})">${inner}</g>`
 
+/*
+ * A picture has a limit on its length, and robots of one role are drawn alike, so a drawing that
+ * comes up again in the picture being built is written once and referred to after that.
+ */
+let drawnOnce: Map<string, string> | null = null
+function once(svg: string): string {
+  if (!drawnOnce || svg.length < 120) return svg
+  let id = drawnOnce.get(svg)
+  if (!id) {
+    id = `u${drawnOnce.size}`
+    drawnOnce.set(svg, id)
+  }
+  return `<use href="#${id}"/>`
+}
+/** What `once` wrote down, to head the picture: kept apart from where it is used, since a use may be dropped. */
+function drawnOnceSvg(): string {
+  if (!drawnOnce || !drawnOnce.size) return ''
+  let out = ''
+  for (const [svg, id] of drawnOnce) out += `<g id="${id}">${svg}</g>`
+  return `<defs>${out}</defs>`
+}
+
 /** A sprite as several frames, drawn by `draw` at each time in `times`. */
 function sprite(w: number, h: number, times: number[], durs: number[], detail: Detail, draw: (g: Px, t: number) => void): string {
   const ts = detail > 0 ? times.slice(0, 1) : times
@@ -1896,7 +1926,7 @@ function sprite(w: number, h: number, times: number[], durs: number[], detail: D
     ts.map((t) => {
       const g = new Px(w, h)
       draw(g, t)
-      return g.svg()
+      return once(g.svg())
     }),
     durs,
   )
@@ -1952,7 +1982,7 @@ function bubbleSvg(kind: ActivityKind | 'break', label: string, sm: boolean, x: 
   cloud(shell, 1, 1, w, h, tailX - x + 1, tailY - y + 1)
   const times = [0, 0.45, 0.9, 1.35]
   const inner = sprite(w - 6, h - 4, times, [0.45, 0.45, 0.45, 0.45], detail, (g, a) => f(g, 0, 0, w - 6, h - 4, a + 0.6, label, sm))
-  return at(x - 1, y - 1, shell.svg()) + at(x + 3, y + 2, inner)
+  return at(x - 1, y - 1, once(shell.svg())) + at(x + 3, y + 2, inner)
 }
 
 function screenFor(kind: ActivityKind): ScreenMode {
@@ -2050,7 +2080,7 @@ export function phaseOf(r: Robot, floors: number): Phase | null {
       : [[seat.x, seat.y], [seat.x, seat.floorY], [SHAFT_X, seat.floorY], [SHAFT_X, groundY], [DELIVER_X, groundY]]
   const leaveCum = timings(leavePts)
   // A fast subagent still reaches its desk and works a moment before it reports.
-  const workEnd = r.endedAt === undefined ? null : Math.max(r.endedAt, arriveAt + MIN_WORK_MS, r.exitAt ?? 0)
+  const workEnd = r.endedAt === undefined ? null : Math.max(r.endedAt + REPORT_READY_MS, arriveAt + MIN_WORK_MS, r.exitAt ?? 0)
   if (workEnd === null)
     return { seat, feedEnd, briefPts, briefCum, briefAt, briefEnd, pts, cum, printEnd, arriveAt, workEnd, leaveAt: null, leavePts, leaveCum, handAt: null, toHoleAt: null, jumpAt: null, splashAt: null, goneAt: null }
   const leaveAt = workEnd + CHEER_MS
@@ -2149,7 +2179,11 @@ const BG_CACHE = new Map<string, string>()
 function cached(key: string, make: () => string): string {
   let svg = BG_CACHE.get(key)
   if (!svg) {
+    // kept from one picture to the next, it refers to nothing in the picture it was first drawn for
+    const held = drawnOnce
+    drawnOnce = null
     svg = make()
+    drawnOnce = held
     BG_CACHE.set(key, svg)
   }
   return svg
@@ -2365,7 +2399,233 @@ function shedSvg(role: string, small: boolean, girth: number, x: number, fy: num
   return `<g data-what="shed">${out}</g>`
 }
 
-function compose(world: World, now: number, selected: string, detail: Detail): string {
+/* ---------- the room and the journeys ---------- */
+/*
+ * The desktop app redraws the pane by building it anew. A picture drawn as an image starts over
+ * each time that happens; one drawn in a frame is kept, and goes on playing, for as long as its
+ * source stays the same. So each journey a robot makes is a picture of its own, drawn once and
+ * left alone until the journey is over, and everything that stays in its place is the room's
+ * picture, which can change at any moment without moving anybody. Where a robot passes from one
+ * picture to the other it sits still in both for a moment, drawn the same in each, so the change
+ * does not show.
+ */
+/** After a robot sits down, how long until the room draws it too. */
+export const SIT_IN_ROOM_MS = 600
+/** How long the picture of its arrival is kept after it has sat down. */
+export const ARRIVAL_KEPT_MS = 2000
+/** When it starts work in the room: it moves again and its cloud comes up. */
+export const LIVE_IN_MS = 2600
+/** Before it cheers it goes still in the room... */
+export const STILL_OUT_MS = 1500
+/** ...the picture of its leaving shows it from here... */
+export const LEAVING_LEAD_MS = 1000
+/** ...and the room lets go of it here. */
+export const ROOM_OUT_MS = 300
+
+/** When the room draws a robot at its desk: still at first, then at work, then still again before it leaves. */
+export type Stay = { from: number; live: number; still: number | null; until: number | null }
+export function stayOf(p: Phase): Stay {
+  const from = p.arriveAt + SIT_IN_ROOM_MS
+  const live = p.arriveAt + LIVE_IN_MS
+  if (p.workEnd === null) return { from, live, still: null, until: null }
+  return { from, live, still: Math.max(from, p.workEnd - STILL_OUT_MS), until: Math.max(from, p.workEnd - ROOM_OUT_MS) }
+}
+
+/**
+ * Where a robot is in the room's picture, as a number that only goes up: 0 waiting for the printer,
+ * 1 being printed, 2 on its way, 3 sat down and still, 4 at work, 5 still again, 6 on its way out,
+ * 7 gone with the pipe's joint still weeping, 8 gone. The room is drawn afresh after each step.
+ */
+export function stageOf(r: Robot, floors: number, now: number): number {
+  // the main agent is always at its desk
+  if (r.type === 'main') return 4
+  const p = phaseOf(r, floors)
+  if (!p) return 0
+  const s = stayOf(p)
+  if (now < r.spawnedAt) return 0
+  if (now < p.printEnd) return 1
+  if (now < s.from) return 2
+  if (s.until !== null && now >= s.until) return p.goneAt !== null && now >= p.goneAt ? (p.splashAt !== null && now < p.splashAt + LEAK_MS ? 7 : 8) : 6
+  if (s.still !== null && now >= s.still) return 5
+  return now < s.live ? 3 : 4
+}
+
+/** A robot sitting quite still: how it is drawn while it passes from one picture to another. */
+function stillBot(role: string, girth: number, detail: Detail): string {
+  return sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'sit', eyes: 'up', t: 0, seated: true, girth }))
+}
+
+/** What stands on a robot's desk while it is there: the kit of its trade, and code on the screen. */
+function deskSvg(r: Robot, role: string, p: Phase, detail: Detail): string {
+  if (detail >= 3) return ''
+  const kit = new Px(KIT.w, KIT.h)
+  deskProp(kit, role)
+  const screenOn = sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
+  return at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.monX, p.seat.monY, screenOn)
+}
+
+const roleIdOf = (r: Robot) => r.role ?? roleOf(r.type, r.description)
+
+/** A robot walking: riding the lift it stands still, and a carrying robot keeps its arms full. */
+function walkerOf(role: string, girth: number, detail: Detail) {
+  return (pose: Pose, eyes: Eyes, item?: 'report' | 'blueprint') => (face: number, riding: boolean) =>
+    sprite(26, 34, riding ? [0] : [0, 0.11], [0.12, 0.12], detail, (g, t) =>
+      bot(g, 13, 32, { role, small: true, pose: riding && pose !== 'carry' ? 'stand' : pose, eyes, face, t, item, girth, tool: true }),
+    )
+}
+
+/**
+ * A robot's arrival, in building coordinates: the metal comes up the pipe, the printer builds it,
+ * it collects its blueprint from the main agent, walks to its desk and sits down. `plateFrom` is
+ * when the plate is its own: the robot printed before it has stepped off.
+ */
+function arrivalSvg(r: Robot, floors: number, now: number, plateFrom: number, detail: Detail): string {
+  const p = phaseOf(r, floors)
+  if (!p || p.arriveAt + ARRIVAL_KEPT_MS <= now) return ''
+  const sec = (t: number) => (t - now) / 1000
+  const gy = floors * FLOOR_H
+  const groundY = gy + FY
+  const role = roleIdOf(r)
+  const girth = girthOf(r.context)
+  let out = ''
+  if (p.feedEnd > now) out += at(0, gy, feedSvg(r.spawnedAt, p.feedEnd, sec, detail))
+  if (p.printEnd > now) {
+    const cx = PRINTER.x + (PRINTER.w >> 1)
+    const id = `clip-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
+    const room = `chamber-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
+    const g = new Px(26, 34)
+    bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'off', bulb: C.steelD, girth })
+    const b = s2(sec(p.feedEnd))
+    const d = s2((p.printEnd - p.feedEnd) / 1000)
+    const reveal = `<clipPath id="${id}"><rect x="${PRINTER.x + 3}" y="${PLATE_Y}" width="${PRINTER.w - 6}" height="0"><animate attributeName="y" from="${PLATE_Y}" to="${PLATE_Y - PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/><animate attributeName="height" from="0" to="${PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/></rect></clipPath>`
+    const chamber = `<clipPath id="${room}"><rect x="${PRINTER.x + 4}" y="${PRINTER.y + 4}" width="${PRINTER.w - 8}" height="${PLATE_Y - PRINTER.y - 4}"/></clipPath>`
+    // the gantry comes down to the bed while the metal comes up the pipe, then rises a layer at a time
+    const head = sprite(W, GROUND_H, [0, 0.15, 0.3, 0.45], [0.15, 0.15, 0.15, 0.15], detail, (hg, t) =>
+      printerGantry(hg, cx + Math.round(Math.sin(t * 7) * 6), PLATE_Y - 1, true, PRINTER.y - PRINT_RISE),
+    )
+    const span = p.printEnd - r.spawnedAt
+    const key = (t: number) => (Math.max(0, t - r.spawnedAt) / span).toFixed(4)
+    const z = `<animateTransform attributeName="transform" type="translate" values="0 ${-PRINT_RISE};0 ${-PRINT_RISE};0 0;0 ${-PRINT_RISE}" keyTimes="0;${key(p.feedEnd - 500)};${key(p.feedEnd)};1" begin="${s2(sec(r.spawnedAt))}s" dur="${s2(span / 1000)}s" fill="freeze"/>`
+    const gantry = `<g clip-path="url(#${room})"><g transform="translate(0 ${-PRINT_RISE})">${z}${head}</g></g>`
+    // the control box's screen fills as the robot prints
+    const bar = `<rect x="${LCD.x}" y="${LCD.y + 1}" width="0" height="1" fill="${C.green}"><animate attributeName="width" from="0" to="${LCD.w}" begin="${b}s" dur="${d}s" fill="freeze"/></rect>`
+    // the printer builds one robot at a time: this one's turn starts when the one before is off the plate
+    out += at(0, gy, during(plateFrom > now ? sec(plateFrom) : null, sec(p.printEnd), `${reveal}${chamber}<g clip-path="url(#${id})">${at(cx - 13, PLATE_Y - 32, g.svg())}</g>${gantry}${bar}`))
+  }
+  const walker = walkerOf(role, girth, detail)
+  if (p.briefAt > now) out += walkLegs(p.briefPts, p.briefCum, p.printEnd, now, walker('walk', 'open'))
+  if (p.briefEnd > now) {
+    // the main agent hands over the task's blueprint
+    const waiting = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'up', face: 1, girth, tool: true }))
+    const holding = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'carry', eyes: 'happy', face: 1, item: 'blueprint', girth }))
+    const caught = p.briefAt + 650
+    out += during(sec(p.briefAt), sec(caught), at(BRIEF_X - 13, groundY - 32, waiting))
+    out += during(sec(caught), sec(p.briefEnd), at(BRIEF_X - 13, groundY - 32, holding))
+    const roll = new Px(7, 4)
+    R(roll, C.ink, 0, 0, 7, 4)
+    R(roll, C.blue, 1, 1, 5, 2)
+    R(roll, '#a9ccff', 1, 1, 5, 1)
+    R(roll, C.paper, 1, 1, 1, 2)
+    const fromB = `${MAIN_X - 8} ${gy + SEAT_Y - 16}`
+    const toB = `${BRIEF_X + 2} ${groundY - 14}`
+    const toss = `<g transform="translate(${fromB})"><animateTransform attributeName="transform" type="translate" values="${fromB};${Math.round((MAIN_X + BRIEF_X) / 2) - 4} ${gy + SEAT_Y - 30};${toB}" keyTimes="0;0.5;1" begin="${s2(sec(p.briefAt + 150))}s" dur="0.5s" fill="freeze"/>${roll.svg()}</g>`
+    out += during(sec(p.briefAt + 150), sec(caught), toss)
+  }
+  if (p.arriveAt > now) out += walkLegs(p.pts, p.cum, p.briefEnd, now, walker('carry', 'open', 'blueprint'))
+  // sat down, it keeps still here until the room has it
+  out += during(sec(p.arriveAt), sec(p.arriveAt + ARRIVAL_KEPT_MS), deskSvg(r, role, p, detail) + at(p.seat.x - 13, p.seat.y - 32, stillBot(role, girth, detail)))
+  return out ? `<g data-what="arrival">${out}</g>` : ''
+}
+
+/**
+ * A robot's leaving, in building coordinates: a cheer at its desk, the report carried to the main
+ * agent and handed over, a few steps to the hatch, and the jump into the molten metal.
+ */
+function leavingSvg(r: Robot, floors: number, now: number, selected: string, detail: Detail): string {
+  const p = phaseOf(r, floors)
+  if (!p || p.workEnd === null || p.leaveAt === null || p.handAt === null || p.toHoleAt === null || p.jumpAt === null || p.splashAt === null || p.goneAt === null) return ''
+  if (p.goneAt <= now) return ''
+  const sec = (t: number) => (t - now) / 1000
+  const gy = floors * FLOOR_H
+  const groundY = gy + FY
+  const role = roleIdOf(r)
+  const girth = girthOf(r.context)
+  const seated = p.seat.y
+  const walker = walkerOf(role, girth, detail)
+  const desk = deskSvg(r, role, p, detail)
+  const mark = r.id === selected ? selectMark(p.seat.x, seated - 20) : ''
+  let out = ''
+  // still at its desk, as the room last drew it
+  out += during(sec(p.workEnd - LEAVING_LEAD_MS), sec(p.workEnd), desk + at(p.seat.x - 13, seated - 32, stillBot(role, girth, detail)) + mark)
+  const endKind: ActivityKind = r.status === 'failed' ? 'error' : 'done'
+  // a cheer at the desk
+  const kit = new Px(KIT.w, KIT.h)
+  deskProp(kit, role)
+  const cloud = detail >= 2 ? '' : bubbleSvg(endKind, '', true, p.seat.bubble.x, p.seat.bubble.y, p.seat.x, seated - 18, detail)
+  const cheering = at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(endKind, true), true, detail, true, girth)) + mark + cloud
+  out += during(sec(p.workEnd), sec(p.leaveAt), cheering)
+  // carrying the report down to the main desk
+  out += walkLegs(p.leavePts, p.leaveCum, p.leaveAt, now, walker('carry', 'happy', 'report'))
+  // handing it over: the robot faces the main agent and the report flies across
+  const standing = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'happy', face: -1, girth, tool: true }))
+  out += during(sec(p.handAt), sec(p.toHoleAt), at(DELIVER_X - 13, groundY - 32, standing))
+  const paper = new Px(6, 5)
+  R(paper, C.ink, 0, 0, 6, 5)
+  R(paper, C.paper, 1, 1, 4, 3)
+  R(paper, C.amber, 1, 1, 4, 1)
+  const fromP = `${DELIVER_X - 8} ${groundY - 13}`
+  const toP = `${MAIN_X + 4} ${gy + SEAT_Y - 14}`
+  const flight = `<g transform="translate(${fromP})"><animateTransform attributeName="transform" type="translate" values="${fromP};${DELIVER_X - 30} ${groundY - 24};${toP}" keyTimes="0;0.5;1" begin="${s2(sec(p.handAt))}s" dur="0.6s" fill="freeze"/>${paper.svg()}</g>`
+  out += during(sec(p.handAt), sec(p.handAt + 600), flight)
+  const thanks = new Px(11, 9)
+  R(thanks, C.ink, 0, 0, 11, 9)
+  R(thanks, C.paper, 1, 1, 9, 7)
+  check(thanks, 0, 0, C.greenD)
+  // the tick for it comes up beside the main agent's cloud: this picture lies over the room, cloud and all
+  out += during(sec(p.handAt + 600), sec(p.handAt + 1500), at(MAIN_X + 30, gy + SEAT_Y - 36, thanks.svg()))
+  // a few steps to the hatch, which opens and lets the light into the pit; a hop, and down into the vat
+  const toHole: Pt[] = [[DELIVER_X, groundY], [HOLE_X, groundY]]
+  out += walkLegs(toHole, timings(toHole), p.toHoleAt, now, walker('walk', 'happy'))
+  const opened = p.jumpAt - HATCH_LEAD_MS
+  const shut = p.splashAt + HATCH_HOLD_MS
+  const open = new Px(HOLE_W + 2, 8)
+  R(open, CELLAR, 1, 0, HOLE_W, 8)
+  R(open, '#4a4f70', 0, 0, 2, 7)
+  R(open, '#4a4f70', HOLE_W, 0, 2, 7)
+  out += during(sec(opened), sec(shut), at(HOLE_X0 - 1, groundY, open.svg()))
+  out += at(0, gy, hatchLight([{ open: opened, shut }], sec, detail))
+  const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'cheer', eyes: 'happy', girth }))
+  const a = `${HOLE_X - 13} ${groundY - 32}`
+  const values = `${a};${HOLE_X - 13} ${groundY - 41};${HOLE_X - 13} ${gy + MELT_Y + 12 - 32}`
+  const hop = (HOP_MS / (HOP_MS + FALL_MS)).toFixed(3)
+  const id = `melt-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
+  const fall = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${values}" keyTimes="0;${hop};1" calcMode="spline" keySplines="0 0 0.58 1;0.42 0 1 1" begin="${s2(sec(p.jumpAt))}s" dur="${s2((HOP_MS + FALL_MS) / 1000)}s" fill="freeze"/>${leaping}</g>`
+  out += during(sec(p.jumpAt), sec(p.splashAt), `<clipPath id="${id}"><rect x="0" y="0" width="${W}" height="${gy + MELT_Y}"/></clipPath><g clip-path="url(#${id})">${fall}</g>`)
+  // the splash
+  const splash = sprite(30, 14, [0, 0.25, 0.5], [0.25, 0.25, 0.3], detail, (g, t) => {
+    const k = Math.round(t / 0.25)
+    const drops: Array<[number, number, string]> = [[-6, 3, '#ffd166'], [5, 4, '#ff9a3c'], [-2, 6, '#ffb347'], [8, 2, '#e8501f'], [-9, 2, '#ff9a3c']]
+    for (const [dx, up, c] of drops) R(g, c, 15 + dx * (1 + k * 0.4), 11 - up * (k === 1 ? 2 : k === 0 ? 1 : 1.4) + k * 2, 1 + (k === 0 ? 1 : 0), 1)
+    R(g, k === 0 ? C.lamp : '#ffd166', 9 - k * 2, 12, 12 + k * 4, 1)
+  })
+  out += during(sec(p.splashAt), sec(p.goneAt), at(HOLE_X - 15, gy + MELT_Y - 12, splash))
+  return `<g data-what="leaving">${out}</g>`
+}
+
+/** When the plate is a robot's own: once every robot printed before it has stepped off. */
+export function plateFromOf(r: Robot, others: Robot[], floors: number): number {
+  const mine = phaseOf(r, floors)?.printEnd ?? 0
+  let from = r.spawnedAt
+  for (const o of others) {
+    if (o.type === 'main' || o.id === r.id) continue
+    const end = phaseOf(o, floors)?.printEnd ?? 0
+    if (end < mine) from = Math.max(from, end)
+  }
+  return from
+}
+
+/** Everything that stays in its place, in building coordinates: the building, its machines, the robots at their desks, the main agent. */
+function roomSvg(world: World, now: number, selected: string, detail: Detail): string {
   const sec = (t: number) => (t - now) / 1000
   const floors = world.floors
   const gy = floors * FLOOR_H
@@ -2397,14 +2657,9 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     tx(plate, `+${Math.min(9, waiting.length - i)}`, 2, 1, C.ink)
     ground += during(i === 0 ? null : sec(waiting[i - 1]!), sec(t), at(PRINTER.x + 18, PLATE_Y + 4, plate.svg()))
   })
-  ground += `<clipPath id="chamber"><rect x="${PRINTER.x + 4}" y="${PRINTER.y + 4}" width="${PRINTER.w - 8}" height="${PLATE_Y - PRINTER.y - 4}"/></clipPath>`
   ground += at(BOARD.x, BOARD.y, tokenChart(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
   ground += employeeFrame(world.tokens, now, detail)
   ground += at(HOLE_X - 23, MELT_Y - 4, meltLife(detail))
-  for (const r of subs) {
-    const p = phaseOf(r, floors)
-    if (p && p.feedEnd > now) ground += feedSvg(r.spawnedAt, p.feedEnd, sec, detail)
-  }
   const mainKind = main?.activity.kind ?? 'idle'
   ground += screenSvg(133, 88, 23, 15, screenFor(mainKind), detail)
   const asking = world.robots.some((r) => r.activity.kind === 'ask' && r.status === 'working')
@@ -2424,141 +2679,47 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
   }
   out += at(0, gy, ground)
 
-  // subagents: printed, walking, working, then cheering and leaving
-  const drops: Array<{ open: number; shut: number }> = []
-  const printEnds = printing.map((p) => p.printEnd)
+  // the robots at their desks: still as they come and before they go, at work in between
   for (const r of subs) {
     const p = phaseOf(r, floors)
-    if (!p || (p.goneAt !== null && p.goneAt <= now)) continue
-    const role = r.role ?? roleOf(r.type, r.description)
+    if (!p) continue
+    const stay = stayOf(p)
+    if (stay.until !== null && stay.until <= now) continue
+    const role = roleIdOf(r)
     const girth = girthOf(r.context)
-    if (p.printEnd > now) {
-      const cx = PRINTER.x + (PRINTER.w >> 1)
-      const id = `clip-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
-      const g = new Px(26, 34)
-      bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'off', bulb: C.steelD, girth })
-      const b = s2(sec(p.feedEnd))
-      const d = s2((p.printEnd - p.feedEnd) / 1000)
-      // the printer builds one robot at a time: this one's turn starts when the one before is done
-      const before = Math.max(0, ...printEnds.filter((t) => t < p.printEnd))
-      const reveal = `<clipPath id="${id}"><rect x="${PRINTER.x + 3}" y="${PLATE_Y}" width="${PRINTER.w - 6}" height="0"><animate attributeName="y" from="${PLATE_Y}" to="${PLATE_Y - PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/><animate attributeName="height" from="0" to="${PRINT_RISE}" begin="${b}s" dur="${d}s" fill="freeze"/></rect></clipPath>`
-      // the gantry comes down to the bed while the metal comes up the pipe, then rises a layer at a time
-      const head = sprite(W, GROUND_H, [0, 0.15, 0.3, 0.45], [0.15, 0.15, 0.15, 0.15], detail, (hg, t) =>
-        printerGantry(hg, cx + Math.round(Math.sin(t * 7) * 6), PLATE_Y - 1, true, PRINTER.y - PRINT_RISE),
-      )
-      const span = p.printEnd - r.spawnedAt
-      const key = (t: number) => (Math.max(0, t - r.spawnedAt) / span).toFixed(4)
-      const z = `<animateTransform attributeName="transform" type="translate" values="0 ${-PRINT_RISE};0 ${-PRINT_RISE};0 0;0 ${-PRINT_RISE}" keyTimes="0;${key(p.feedEnd - 500)};${key(p.feedEnd)};1" begin="${s2(sec(r.spawnedAt))}s" dur="${s2(span / 1000)}s" fill="freeze"/>`
-      const gantry = `<g clip-path="url(#chamber)"><g transform="translate(0 ${-PRINT_RISE})">${z}${head}</g></g>`
-      // the control box's screen fills as the robot prints
-      const bar = `<rect x="${LCD.x}" y="${LCD.y + 1}" width="0" height="1" fill="${C.green}"><animate attributeName="width" from="0" to="${LCD.w}" begin="${b}s" dur="${d}s" fill="freeze"/></rect>`
-      out += at(0, gy, during(before ? sec(before) : null, sec(p.printEnd), `${reveal}<g clip-path="url(#${id})">${at(cx - 13, PLATE_Y - 32, g.svg())}</g>${gantry}${bar}`))
-    }
-    // Riding the lift a robot stands still; a carrying robot keeps its arms full.
-    const walker = (pose: Pose, eyes: Eyes, item?: 'report' | 'blueprint') => (face: number, riding: boolean) =>
-      sprite(26, 34, riding ? [0] : [0, 0.11], [0.12, 0.12], detail, (g, t) =>
-        bot(g, 13, 32, { role, small: true, pose: riding && pose !== 'carry' ? 'stand' : pose, eyes, face, t, item, girth, tool: true }),
-      )
-    const groundY = gy + FY
-    if (p.briefAt > now) out += walkLegs(p.briefPts, p.briefCum, p.printEnd, now, walker('walk', 'open'))
-    if (p.briefEnd > now) {
-      // the main agent hands over the task's blueprint
-      const waiting = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'up', face: 1, girth, tool: true }))
-      const holding = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'carry', eyes: 'happy', face: 1, item: 'blueprint', girth }))
-      const caught = p.briefAt + 650
-      out += during(sec(p.briefAt), sec(caught), at(BRIEF_X - 13, groundY - 32, waiting))
-      out += during(sec(caught), sec(p.briefEnd), at(BRIEF_X - 13, groundY - 32, holding))
-      const roll = new Px(7, 4)
-      R(roll, C.ink, 0, 0, 7, 4)
-      R(roll, C.blue, 1, 1, 5, 2)
-      R(roll, '#a9ccff', 1, 1, 5, 1)
-      R(roll, C.paper, 1, 1, 1, 2)
-      const fromB = `${MAIN_X - 8} ${gy + SEAT_Y - 16}`
-      const toB = `${BRIEF_X + 2} ${groundY - 14}`
-      const toss = `<g transform="translate(${fromB})"><animateTransform attributeName="transform" type="translate" values="${fromB};${Math.round((MAIN_X + BRIEF_X) / 2) - 4} ${gy + SEAT_Y - 30};${toB}" keyTimes="0;0.5;1" begin="${s2(sec(p.briefAt + 150))}s" dur="0.5s" fill="freeze"/>${roll.svg()}</g>`
-      out += during(sec(p.briefAt + 150), sec(caught), toss)
-    }
-    if (p.arriveAt > now) out += walkLegs(p.pts, p.cum, p.briefEnd, now, walker('carry', 'open', 'blueprint'))
     const seated = p.seat.y
+    const until = stay.until === null ? null : sec(stay.until)
+    out += during(sec(stay.from), until, deskSvg(r, role, p, detail))
+    const sits = at(p.seat.x - 13, seated - 32, stillBot(role, girth, detail))
+    // at work from `a0` until `a1`
+    const a0 = stay.live
+    const a1 = stay.still
+    if (a1 !== null && a1 <= a0) {
+      out += during(sec(stay.from), until, sits)
+      continue
+    }
+    out += during(sec(stay.from), sec(a0), sits)
+    if (a1 !== null) out += during(sec(a1), until, sits)
+    const end = a1 === null ? null : sec(a1)
     const workKind: ActivityKind = r.status === 'working' ? r.activity.kind : 'think'
     const mark = r.id === selected ? selectMark(p.seat.x, seated - 20) : ''
-    const screenOn = sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
-    const cloudOf = (kind: ActivityKind, label: string) =>
-      detail >= 2 ? '' : bubbleSvg(kind, label, true, p.seat.bubble.x, p.seat.bubble.y, p.seat.x, seated - 18, detail)
-    const kit = new Px(KIT.w, KIT.h)
-    deskProp(kit, role)
-    const props = at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, kit.svg())
-    const desk = props + at(p.seat.monX, p.seat.monY, screenOn)
-    const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) + mark + cloudOf(workKind, r.status === 'working' ? r.activity.label : '')
-    const until = p.workEnd === null ? null : sec(p.workEnd)
+    const cloud = detail >= 2 ? '' : bubbleSvg(workKind, r.status === 'working' ? r.activity.label : '', true, p.seat.bubble.x, p.seat.bubble.y, p.seat.x, seated - 18, detail)
+    const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) + mark + cloud
     // a compaction at its desk: it is up and hopping, shedding bolts, for as long as it runs, then sits down again
     const shed = shedSpan(r, now)
-    const up = shed ? Math.max(shed.from, p.arriveAt) : 0
-    const down = shed ? (p.workEnd === null ? shed.until : Math.min(shed.until, p.workEnd)) : 0
-    if (!shed) out += during(sec(p.arriveAt), until, desk + sitter)
-    else {
-      out += during(sec(p.arriveAt), until, desk)
-      if (down <= up) out += during(sec(p.arriveAt), until, sitter)
-      else out += (up > p.arriveAt ? during(sec(p.arriveAt), sec(up), sitter) : '') + (p.workEnd === null || down < p.workEnd ? during(sec(down), until, sitter) : '')
+    const up = shed ? Math.max(shed.from, a0) : 0
+    const down = shed ? (a1 === null ? shed.until : Math.min(shed.until, a1)) : 0
+    if (!shed || down <= up) out += during(sec(a0), end, sitter)
+    else out += (up > a0 ? during(sec(a0), sec(up), sitter) : '') + (a1 === null || down < a1 ? during(sec(down), end, sitter) : '')
+    if (shed) {
       // the pile lies at its feet, clear of the hatch in the floor
       const beside = p.seat.x - 15
       const pile = p.seat.floor === 0 && beside < HOLE_X0 + HOLE_W + 2 && beside + PILE_W > HOLE_X0 - 2 ? HOLE_X0 + HOLE_W + 2 : beside
       out += shedSvg(role, true, girthOf(r.compactedFrom ?? r.context), p.seat.x, p.seat.floorY, pile, shed, up, down, sec)
     }
-    if (p.workEnd !== null && p.leaveAt !== null && p.handAt !== null && p.toHoleAt !== null && p.jumpAt !== null && p.splashAt !== null && p.goneAt !== null) {
-      const endKind: ActivityKind = r.status === 'failed' ? 'error' : 'done'
-      // a cheer at the desk
-      const cheering = props + at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(endKind, true), true, detail, true, girth)) + mark + cloudOf(endKind, '')
-      out += during(sec(p.workEnd), sec(p.leaveAt), cheering)
-      // carrying the report down to the main desk
-      out += walkLegs(p.leavePts, p.leaveCum, p.leaveAt, now, walker('carry', 'happy', 'report'))
-      // handing it over: the robot faces the main agent and the report flies across
-      const standing = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'stand', eyes: 'happy', face: -1, girth, tool: true }))
-      out += during(sec(p.handAt), sec(p.toHoleAt), at(DELIVER_X - 13, groundY - 32, standing))
-      const paper = new Px(6, 5)
-      R(paper, C.ink, 0, 0, 6, 5)
-      R(paper, C.paper, 1, 1, 4, 3)
-      R(paper, C.amber, 1, 1, 4, 1)
-      const fromP = `${DELIVER_X - 8} ${groundY - 13}`
-      const toP = `${MAIN_X + 4} ${gy + SEAT_Y - 14}`
-      const flight = `<g transform="translate(${fromP})"><animateTransform attributeName="transform" type="translate" values="${fromP};${DELIVER_X - 30} ${groundY - 24};${toP}" keyTimes="0;0.5;1" begin="${s2(sec(p.handAt))}s" dur="0.6s" fill="freeze"/>${paper.svg()}</g>`
-      out += during(sec(p.handAt), sec(p.handAt + 600), flight)
-      const thanks = new Px(11, 9)
-      R(thanks, C.ink, 0, 0, 11, 9)
-      R(thanks, C.paper, 1, 1, 9, 7)
-      check(thanks, 0, 0, C.greenD)
-      out += during(sec(p.handAt + 600), sec(p.handAt + 1500), at(MAIN_X - 5, gy + SEAT_Y - 40, thanks.svg()))
-      // a few steps to the hatch, which opens and lets the light into the pit; a hop, and down into the vat
-      const toHole: Pt[] = [[DELIVER_X, groundY], [HOLE_X, groundY]]
-      out += walkLegs(toHole, timings(toHole), p.toHoleAt, now, walker('walk', 'happy'))
-      const opened = p.jumpAt - HATCH_LEAD_MS
-      const shut = p.splashAt + HATCH_HOLD_MS
-      const open = new Px(HOLE_W + 2, 8)
-      R(open, CELLAR, 1, 0, HOLE_W, 8)
-      R(open, '#4a4f70', 0, 0, 2, 7)
-      R(open, '#4a4f70', HOLE_W, 0, 2, 7)
-      out += during(sec(opened), sec(shut), at(HOLE_X0 - 1, groundY, open.svg()))
-      drops.push({ open: opened, shut })
-      const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'cheer', eyes: 'happy', girth }))
-      const a = `${HOLE_X - 13} ${groundY - 32}`
-      const values = `${a};${HOLE_X - 13} ${groundY - 41};${HOLE_X - 13} ${gy + MELT_Y + 12 - 32}`
-      const hop = (HOP_MS / (HOP_MS + FALL_MS)).toFixed(3)
-      const id = `melt-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
-      const fall = `<g transform="translate(${a})"><animateTransform attributeName="transform" type="translate" values="${values}" keyTimes="0;${hop};1" calcMode="spline" keySplines="0 0 0.58 1;0.42 0 1 1" begin="${s2(sec(p.jumpAt))}s" dur="${s2((HOP_MS + FALL_MS) / 1000)}s" fill="freeze"/>${leaping}</g>`
-      out += during(sec(p.jumpAt), sec(p.splashAt), `<clipPath id="${id}"><rect x="0" y="0" width="${W}" height="${gy + MELT_Y}"/></clipPath><g clip-path="url(#${id})">${fall}</g>`)
-      // the splash
-      const splash = sprite(30, 14, [0, 0.25, 0.5], [0.25, 0.25, 0.3], detail, (g, t) => {
-        const k = Math.round(t / 0.25)
-        const drops: Array<[number, number, string]> = [[-6, 3, '#ffd166'], [5, 4, '#ff9a3c'], [-2, 6, '#ffb347'], [8, 2, '#e8501f'], [-9, 2, '#ff9a3c']]
-        for (const [dx, up, c] of drops) R(g, c, 15 + dx * (1 + k * 0.4), 11 - up * (k === 1 ? 2 : k === 0 ? 1 : 1.4) + k * 2, 1 + (k === 0 ? 1 : 0), 1)
-        R(g, k === 0 ? C.lamp : '#ffd166', 9 - k * 2, 12, 12 + k * 4, 1)
-      })
-      out += during(sec(p.splashAt), sec(p.goneAt), at(HOLE_X - 15, gy + MELT_Y - 12, splash))
-    }
   }
 
-  // daylight falls into the cellar while a hatch is open, and each splash leaves the pipe's joint weeping
-  out += at(0, gy, hatchLight(drops, sec, detail))
+  // each splash leaves the pipe's joint weeping
   if (detail < 2)
     for (const r of subs) {
       const splash = phaseOf(r, floors)?.splashAt ?? null
@@ -2604,42 +2765,157 @@ function compose(world: World, now: number, selected: string, detail: Detail): s
     const says = `<g data-what="main-says">${seatedWith}</g>`
     out += hopping ? during(sec(shed.until), null, says) : says
   }
-  const roof = cached('roof', () => paintRoof().svg())
-  const beacon = `<rect x="205" y="0" width="3" height="1" fill="${C.red}"><animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite"/></rect>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${height}" width="${W * 6}" height="${height * 6}" shape-rendering="crispEdges">${roof}${beacon}${at(0, ROOF_H, out)}</svg>`
+  return out
 }
 
-/** The whole building at `now`, every change still to come encoded as SMIL timing; kept under the Svg cap. */
-export function buildScene(world: World, now: number, selected = ''): string {
-  let svg = compose(world, now, selected, 0)
-  if (svg.length > 120_000) svg = compose(world, now, selected, 1)
-  if (svg.length > 128_000) svg = compose(world, now, selected, 2)
+/** The app takes a picture's source up to 131072 characters; a longer one is not drawn at all. */
+const SOURCE_CAP = 126_000
+
+const picture = (height: number, inner: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${height}" width="${W * 6}" height="${height * 6}" preserveAspectRatio="xMinYMax meet" shape-rendering="crispEdges">${inner}</svg>`
+
+function roofSvg(): string {
+  const roof = cached('roof', () => paintRoof().svg())
+  return `${roof}<rect x="205" y="0" width="3" height="1" fill="${C.red}"><animate attributeName="opacity" values="1;0.15;1" dur="1.6s" repeatCount="indefinite"/></rect>`
+}
+
+/** As much of a picture's motion as fits under the cap: full, then single frames, then no helpers' clouds, then bare desks. */
+function fitted(height: number, make: (detail: Detail) => string): string {
+  let svg = ''
+  for (const detail of [0, 1, 2, 3] as const) {
+    drawnOnce = new Map()
+    const inner = make(detail)
+    svg = picture(height, drawnOnceSvg() + inner)
+    drawnOnce = null
+    if (svg.length <= SOURCE_CAP) break
+  }
   return svg
 }
 
-/* ---------- laying a new picture ---------- */
+/** The room at `now`: what stays in its place, with every change still to come encoded as SMIL timing. */
+export function buildRoom(world: World, now: number, selected = ''): string {
+  loopAt = now
+  return fitted(sceneHeight(world.floors), (detail) => roofSvg() + at(0, ROOF_H, roomSvg(world, now, selected, detail)))
+}
+
+/** What a journey's picture is drawn from: the robot as it was when its journey was laid. */
+export type Journey = { kind: 'in' | 'out'; robot: Robot; floors: number; plateFrom: number; selected?: string }
+
+/** One robot's journey at `now`, on nothing: laid over the room, it plays to its end untouched. */
+export function buildJourney(j: Journey, now: number): string {
+  loopAt = now
+  return fitted(sceneHeight(j.floors), (detail) =>
+    at(0, ROOF_H, j.kind === 'in' ? arrivalSvg(j.robot, j.floors, now, j.plateFrom, detail) : leavingSvg(j.robot, j.floors, now, j.selected ?? '', detail)),
+  )
+}
+
+/** When a journey's picture is over and can be taken away. */
+export function journeyEnd(j: Journey): number {
+  const p = phaseOf(j.robot, j.floors)
+  if (!p) return 0
+  return j.kind === 'in' ? p.arriveAt + ARRIVAL_KEPT_MS : (p.goneAt ?? 0) + 300
+}
+
+/** The whole building at `now` in one picture, journeys and all: for stills and for surfaces that draw one layer. */
+export function buildScene(world: World, now: number, selected = ''): string {
+  loopAt = now
+  const subs = world.robots.filter((r) => r.type !== 'main')
+  return fitted(sceneHeight(world.floors), (detail) => {
+    let journeys = ''
+    for (const r of subs) journeys += arrivalSvg(r, world.floors, now, plateFromOf(r, subs, world.floors), detail) + leavingSvg(r, world.floors, now, selected, detail)
+    return roofSvg() + at(0, ROOF_H, roomSvg(world, now, selected, detail) + journeys)
+  })
+}
+
+/** A picture of nothing as tall as the building: it gives the pane its height, and the layers lie over it. */
+export function sizerSvg(floors: number): string {
+  const height = sceneHeight(floors)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${height}" width="${W * 6}" height="${height * 6}"/>`
+}
+
+/* ---------- laying a new picture of the room ---------- */
 /**
- * The app draws the picture as an image, and an image given a new picture shows the old one from
- * its start until the new one has loaded: for that moment every robot is back where it stood when
- * the old picture was drawn. So the picture is kept in two layers, and a new one is only ever laid
- * in the layer that is not on show: over the lower layer, or under the upper one, which comes off
- * once the picture beneath it has had time to load.
+ * The room's picture is drawn in a frame, and a frame given a new picture is empty until that
+ * picture has loaded. So the room is kept in two layers, and a new picture is only ever laid in
+ * the layer that is not on show: over the lower layer, or under the upper one, which comes off
+ * once the picture beneath it has had time to load. The layers lie on the building's ground, so a
+ * picture drawn before the building grew a floor still stands in its place.
  */
-export type Layers = { key: string; height: number; lower: string; upper: string; covered: boolean; uncoverAt: number }
-const NO_PICTURE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
-export const noLayers: Layers = { key: '', height: 0, lower: '', upper: NO_PICTURE, covered: false, uncoverAt: 0 }
-const UNCOVER_MS = 250
+export type Layers = { key: string; lower: string; lowerHeight: number; upper: string; upperHeight: number; covered: boolean; uncoverAt: number }
+export const noLayers: Layers = { key: '', lower: '', lowerHeight: 0, upper: '', upperHeight: 0, covered: false, uncoverAt: 0 }
+const UNCOVER_MS = 600
 
 export function layPicture(l: Layers, key: string, svg: string, height: number, now: number, layered: boolean): Layers {
   // the picture laid underneath has loaded: the upper layer comes off
-  if (l.uncoverAt && now >= l.uncoverAt) l = { ...l, upper: NO_PICTURE, covered: false, uncoverAt: 0 }
+  if (l.uncoverAt && now >= l.uncoverAt) l = { ...l, upper: '', upperHeight: 0, covered: false, uncoverAt: 0 }
   if (key === l.key) return l
-  // the first picture, a surface that draws one layer, or a building that has grown a floor: laid plainly
-  if (!layered || !l.lower || height !== l.height) return { key, height, lower: svg, upper: NO_PICTURE, covered: false, uncoverAt: 0 }
+  // the first picture, or a surface that draws one layer: laid plainly
+  if (!layered || !l.lower) return { key, lower: svg, lowerHeight: height, upper: '', upperHeight: 0, covered: false, uncoverAt: 0 }
   // the lower layer is on show: the new picture goes over it
-  if (!l.covered) return { ...l, key, upper: svg, covered: true, uncoverAt: 0 }
+  if (!l.covered) return { ...l, key, upper: svg, upperHeight: height, covered: true, uncoverAt: 0 }
   // the upper layer is on show: the new picture goes under it, and is uncovered once it has loaded
-  return { ...l, key, lower: svg, uncoverAt: now + UNCOVER_MS }
+  return { ...l, key, lower: svg, lowerHeight: height, uncoverAt: now + UNCOVER_MS }
+}
+
+/* ---------- which journeys are on ---------- */
+/** A journey's picture is laid this long before the journey starts, so it is in place in time. */
+export const JOURNEY_LEAD_MS = 800
+/* A helper whose role is not known yet may wait this long for it before its arrival is laid. */
+const ROLE_WAIT_MS = 600
+/* A leaving cut short, because its robot was given more work, goes a moment after the room has the robot back. */
+const CUT_SHORT_MS = 700
+
+const arrivalKey = (r: Robot) => `in:${r.id}:${r.spawnedAt}:${r.seat}`
+const leavingKey = (r: Robot) => `out:${r.id}:${r.endedAt ?? 0}:${r.exitAt ?? 0}`
+
+/**
+ * The journeys on show at `now`: those laid before and not yet over, and those now due, each in a
+ * free layer of the pane. A journey is laid once, from the robot as it then was, and never again,
+ * so it plays to its end whatever happens meanwhile: what comes next waits its turn in the room.
+ * Returns `acts` itself when nothing changed.
+ */
+export function directJourneys(acts: Act[], robots: Robot[], floors: number, now: number, slots: number): Act[] {
+  const subs = robots.filter((r) => r.type !== 'main')
+  const standing = new Set<string>()
+  for (const r of subs) if (r.endedAt !== undefined) standing.add(leavingKey(r))
+  let changed = false
+  const next: Act[] = []
+  for (const a of acts) {
+    if (a.until <= now) {
+      changed = true
+      continue
+    }
+    // given more work before it stood up, the robot stays: its leaving is taken away
+    if (a.kind === 'out' && !standing.has(a.key) && !hasStoodUp(a.robot, a.floors, now) && a.until > now + CUT_SHORT_MS) {
+      next.push({ ...a, until: now + CUT_SHORT_MS })
+      changed = true
+      continue
+    }
+    next.push(a)
+  }
+  const have = new Set(next.map((a) => a.key))
+  const lay = (kind: 'in' | 'out', r: Robot, key: string) => {
+    const used = new Set(next.map((a) => a.slot))
+    let slot = 0
+    while (used.has(slot)) slot++
+    // every layer is taken: it waits, and joins its journey where it then is
+    if (slot >= slots) return
+    const robot = { ...r, role: roleIdOf(r) }
+    const plateFrom = kind === 'in' ? plateFromOf(r, subs, floors) : 0
+    next.push({ key, slot, kind, at: now, until: journeyEnd({ kind, robot, floors, plateFrom }), floors, plateFrom, robot })
+    have.add(key)
+    changed = true
+  }
+  for (const r of subs) {
+    const p = phaseOf(r, floors)
+    if (!p) continue
+    const arrival = arrivalKey(r)
+    if (!have.has(arrival) && now >= r.spawnedAt - JOURNEY_LEAD_MS && now < p.arriveAt && (r.role !== undefined || now >= r.spawnedAt + ROLE_WAIT_MS)) lay('in', r, arrival)
+    if (p.workEnd === null || p.goneAt === null) continue
+    const leaving = leavingKey(r)
+    if (!have.has(leaving) && now >= p.workEnd - LEAVING_LEAD_MS - JOURNEY_LEAD_MS && now < p.goneAt) lay('out', r, leaving)
+  }
+  return changed ? next : acts
 }
 
 /* ---------- click layers, and which task is open ---------- */

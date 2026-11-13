@@ -134,7 +134,7 @@ claude plugin test tin-collar
 | `types/index.d.ts` | The type contract for the mod's state |
 | `tests/office.test.tsx` | Tests for the behaviour described above |
 
-The picture is drawn into a small pixel framebuffer, converted to SVG paths and animated with SMIL. One picture holds everything that is about to happen (a robot being printed, walking, riding the lift, dropping into the vat), so it is replaced only when the session's state changes. That is why it does not flicker.
+The picture is drawn into a small pixel framebuffer, converted to SVG paths and animated with SMIL. It is laid in layers. The room is one layer: everything that stays in its place. Each journey a robot makes (being printed and walking to its desk, or carrying its report and dropping into the vat) is a layer of its own, laid once and left alone until the journey is over. So whatever the agents do meanwhile, a robot on its way is never moved, and however many helpers are ordered at once, each one's journey plays from start to end. That is why nothing jumps and nothing flickers.
 
 ## License
 

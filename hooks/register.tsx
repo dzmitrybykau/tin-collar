@@ -3,18 +3,20 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'claude-code'
 
-import type { Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Step, World } from '../types'
+import type { Act, Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildScene, CAPACITY, CHART_DAYS, chartRows, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, skyKey, transitionsOf, W } from './scene'
+import { avatarSvg, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
 import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
 const STEPS_KEPT = 60
-// The picture reloads whenever its drawing changes, so changes are held and batched.
+// The room's picture is loaded anew whenever its drawing changes, so changes are held and batched.
 const HOLD_MS = 1800
 const GAP_MS = 1500
 const SWAP_GAP_MS = 350
-const PUBLISH_EVERY_MS = 500
+const PUBLISH_EVERY_MS = 250
+// how many journeys can be on at once, each in a layer of its own
+const ACT_SLOTS = 14
 // the whiteboard's chart re-reads every chat's totals once a minute, and keeps two weeks of them
 const HISTORY_EVERY_MS = 60_000
 const HISTORY_DAYS = 14
@@ -23,6 +25,7 @@ const LIST_KEEP_MS = 120_000
 // Change a shape tag when its type changes: it declines what an older version stored.
 const world = atom({ plugin: 'tin-collar', key: 'world' } as const, { home: '', floors: 0, robots: [], steps: {} }, { shape: 'world-4' })
 const display = atom({ plugin: 'tin-collar', key: 'display' } as const, { at: 0, home: '', floors: 0, robots: [], selected: '' }, { shape: 'display-3' })
+const stage = atom({ plugin: 'tin-collar', key: 'stage' } as const, { acts: [] }, { shape: 'stage-1' })
 const selected = atom({ plugin: 'tin-collar', key: 'selected' } as const, '')
 const redraw = atom({ plugin: 'tin-collar', key: 'redraw' } as const, 0)
 
@@ -259,7 +262,7 @@ function endStep(w: World, id: string, stepId: string, ran: ToolCallResult, now:
 
 const roleIdOf = (r: Robot) => r.role ?? roleOf(r.type, r.description)
 
-/* ---------- the picture: held and batched ---------- */
+/* ---------- the room's picture: held and batched ---------- */
 function shown(d: Display, now: number): Robot[] {
   return d.robots.filter((r) => {
     if (r.type === 'main') return true
@@ -284,10 +287,11 @@ const visualKey = (d: Display, now: number) =>
     chartRows(dailyTotals(d.tokens, d.history, now, CHART_DAYS)),
     // the window follows the hour of the picture's own moment
     skyKey(d.at),
-    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now)]),
+    // where each robot is: the room is drawn afresh once a change it had coming has played
+    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now), stageOf(r, d.floors, now)]),
   ])
 const structureKey = (d: Display, now: number) =>
-  JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt])])
+  JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt, r.endedAt ?? 0, r.exitAt ?? 0])])
 
 function nextDisplay(w: World, prev: Display, sel: string, now: number): Display {
   const robots = w.robots.map((r): Robot => {
@@ -345,35 +349,25 @@ async function loadHistory($: EngineInterface) {
 }
 
 /**
- * The picture plays each robot's one-off moves (printing, the walk, the jump into the vat) from
- * the moment it was drawn, so a reopened or resized pane would play them again. Once every move
- * drawn into the picture has played, a fresh picture holds the scene still instead.
+ * What the pane shows is brought up to date. The journeys come first: each is laid in good time,
+ * once, and then left alone until it is over, so nothing that happens meanwhile can move a robot
+ * that is on its way. Then the room, which changes freely: nobody in it is going anywhere.
  */
-function hasPlayedOut(d: Display, now: number): boolean {
-  if (!d.at) return false
-  let played = false
-  for (const r of d.robots) {
-    if (r.type === 'main') continue
-    for (const t of transitionsOf(r, d.floors)) {
-      if (t <= d.at) continue
-      if (t > now - 300) return false
-      played = true
-    }
-  }
-  return played
-}
-
-async function publish($: EngineInterface, fresh = false) {
+async function publish($: EngineInterface, fresh = false, again = false) {
   const now = Date.now()
   const w = await read($, world)
   const prev = await read($, display)
   const sel = await read($, selected)
+  const on = await read($, stage)
+  let acts = directJourneys(on.acts, w.robots, w.floors, now, ACT_SLOTS)
+  // a pane come back shows every picture from its start: the journeys under way are laid for this moment
+  if (again && acts.length) acts = acts.map((a) => ({ ...a, at: now }))
+  if (acts !== on.acts) await update($, stage, () => ({ acts }))
   // a new picture waits until the one before it has been laid
   if (!fresh && prev.at && now - prev.at < SWAP_GAP_MS) return
   const next = nextDisplay(w, prev, sel, now)
-  const settle = fresh || hasPlayedOut(prev, now)
-  if (!settle && visualKey(next, now) === visualKey(prev, now)) return
-  const structural = settle || structureKey(next, now) !== structureKey(prev, now)
+  if (!fresh && visualKey(next, now) === visualKey(prev, now)) return
+  const structural = fresh || structureKey(next, now) !== structureKey(prev, now)
   if (!structural && now - prev.at < GAP_MS) return
   await update($, display, () => next)
 }
@@ -386,26 +380,43 @@ const HIT_PROPS = { version: 2 } as const
 let pickedAt = 0
 let viewed = { id: '', at: 0 }
 
-/* When the picture's clock starts: when its display was taken, or when the pane was resized. */
-let pictureClock = { displayAt: -1, drawnAt: 0, columns: -1 }
+/* The room's picture: drawn once for what the pane has to show, so its frame is kept from one redraw to the next. */
 let lastPicture = { key: '', svg: '' }
-function pictureOf(d: Display, columns: number, now: number): string {
-  if (pictureClock.displayAt !== d.at) pictureClock = { ...pictureClock, displayAt: d.at, drawnAt: d.at || now }
-  if (pictureClock.columns !== columns) pictureClock = { ...pictureClock, columns, drawnAt: now }
-  const key = `${d.at}|${pictureClock.drawnAt}|${d.selected}`
+function pictureOf(d: Display, now: number): string {
+  const key = `${d.at || now}|${d.selected}`
   if (lastPicture.key !== key) {
     const robots = d.robots.map((r) => ({ ...r, role: roleIdOf(r) }))
-    lastPicture = { key, svg: buildScene({ home: d.home, floors: d.floors, robots, steps: {}, tokens: d.tokens, history: d.history }, pictureClock.drawnAt, d.selected) }
+    lastPicture = { key, svg: buildRoom({ home: d.home, floors: d.floors, robots, steps: {}, tokens: d.tokens, history: d.history }, d.at || now, d.selected) }
   }
   return lastPicture.svg
 }
 
-/* The picture's two layers: a new picture is laid in the one that is not on show. */
+/* The room's two layers: a new picture is laid in the one that is not on show. */
 let laid: Layers = noLayers
-function pictureLayers(d: Display, columns: number, now: number, layered: boolean): Layers {
-  const svg = pictureOf(d, columns, now)
+function roomLayers(d: Display, now: number, layered: boolean): Layers {
+  const svg = pictureOf(d, now)
   laid = layPicture(laid, lastPicture.key, svg, sceneHeight(d.floors), now, layered)
   return laid
+}
+
+/* Each journey's picture, drawn once when it is laid: its frame plays on untouched until the journey is over. */
+const journeyPictures = new Map<string, string>()
+function journeyLayers(acts: Act[]): Array<{ svg: string; height: number } | null> {
+  const layers: Array<{ svg: string; height: number } | null> = Array.from({ length: ACT_SLOTS }, () => null)
+  const kept = new Set<string>()
+  for (const a of acts) {
+    if (a.slot < 0 || a.slot >= ACT_SLOTS) continue
+    const key = `${a.key}@${a.at}`
+    kept.add(key)
+    let svg = journeyPictures.get(key)
+    if (svg === undefined) {
+      svg = buildJourney({ kind: a.kind, robot: a.robot, floors: a.floors, plateFrom: a.plateFrom }, a.at)
+      journeyPictures.set(key, svg)
+    }
+    layers[a.slot] = { svg, height: sceneHeight(a.floors) }
+  }
+  for (const key of [...journeyPictures.keys()]) if (!kept.has(key)) journeyPictures.delete(key)
+  return layers
 }
 
 /* ---------- the pane's words ---------- */
@@ -536,7 +547,7 @@ export const register: Register = (on) => {
       await $.command.register({ name: 'office', description: 'Open the Tin Collar office pane' })
       await $.ui.open({ id: PANE, title: 'Office' })
       $.clock.every(PUBLISH_EVERY_MS, () => void publish($).catch(() => {}))
-      // an upper picture layer that is due to come off has the pane drawn again
+      // an upper layer of the room that is due to come off has the pane drawn again
       // and so does a click layer that is due to be laid afresh
       $.clock.every(100, () => {
         const t = Date.now()
@@ -556,7 +567,7 @@ export const register: Register = (on) => {
   on('session.attach', async ($, e, next) => {
     const res = await next(e)
     try {
-      await publish($, true)
+      await publish($, true, true)
     } catch {}
     return res
   })
@@ -986,27 +997,38 @@ export const register: Register = (on) => {
 
     if (!Svg) return list
 
-    // A plain image, not a frame: swapping an image does not reload a page. Two layers of it,
-    // because an image given a new picture shows the old one from its start until the new one loads.
+    // Every moving picture is a frame: the app keeps a frame whose source has not changed, so it
+    // plays on through every redraw of the pane, where an image would start over each time.
     await read($, redraw)
-    const layers = pictureLayers(shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now), e.props.bodyColumns, now, !!Client)
+    const acts = (await read($, stage)).acts
+    const d = shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now)
+    const layers = roomLayers(d, now, !!Client)
+    const journeys = journeyLayers(acts)
     const alt = `Tin Collar office: ${robots.map((r) => `${robotName(r)} ${stateWord(r)}`).join(', ')}`
-    const picture = <Svg source={layers.lower} alt={alt} />
+    // a layer lies on the building's ground and is as wide as the pane; its source and its words never change while it plays
+    const frame = (name: string, svg: string, height: number, isShown: boolean) => (
+      <Box key={name} position="absolute" bottom={0} left={0} width="100%" height="100%" flexDirection="column" justifyContent="flex-end" overflow="hidden" display={isShown && svg ? 'flex' : 'none'}>
+        {svg ? <Svg source={svg} alt="Tin Collar office" width={W * 6} height={Math.max(1, height) * 6} isInteractive /> : null}
+      </Box>
+    )
     const hitKey = Client ? layer('hit') : null
-    const room = Client ? (
+    const room = (
       <Box position="relative">
-        {picture}
-        <Box key="over" position="absolute" top={0} left={0} width="100%" height="100%" display={layers.covered ? 'flex' : 'none'}>
-          <Svg source={layers.upper} alt={alt} />
-        </Box>
-        {hitKey ? (
+        <Svg source={sizerSvg(d.floors)} alt={alt} />
+        {d.floors < MAX_FLOORS ? (
+          <Box display="none">
+            <Svg source={sizerSvg(d.floors + 1)} alt="Tin Collar office" />
+          </Box>
+        ) : null}
+        {frame('under', layers.lower, layers.lowerHeight, true)}
+        {frame('over', layers.upper, layers.upperHeight, layers.covered)}
+        {journeys.map((j, i) => frame(`journey-${i}`, j ? j.svg : '', j ? j.height : 0, !!j))}
+        {Client && hitKey ? (
           <Box position="absolute" top={0} left={0} width="100%" height="100%">
             <Client key={hitKey} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
           </Box>
         ) : null}
       </Box>
-    ) : (
-      picture
     )
 
     return (

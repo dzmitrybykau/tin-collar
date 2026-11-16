@@ -5,7 +5,7 @@ import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'cl
 
 import type { Act, Activity, ActivityKind, Change, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, gaugeStep, girthOf, hasStoodUp, hitTest, isOverheated, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
+import { avatarSvg, buildCellar, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, gaugeStep, girthOf, hasStoodUp, hatchDrops, hitTest, isOverheated, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
 import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
@@ -438,6 +438,19 @@ function roomLayers(d: Display, now: number, layered: boolean): Layers {
   return laid
 }
 
+/* The cellar's light: drawn when the robots it opens for are known, and laid in two layers of its own like the room. */
+let cellar = { key: '', svg: '', height: 0 }
+let laidCellar: Layers = noLayers
+function cellarLayers(robots: Robot[], floors: number, now: number, layered: boolean): Layers {
+  const drops = hatchDrops(robots, floors, now)
+  const key = JSON.stringify([floors, drops])
+  if (cellar.key !== key) cellar = { key, svg: buildCellar(drops, floors, now), height: sceneHeight(floors) }
+  // with nothing to show there is nothing to lay, and what was laid comes off
+  if (!cellar.svg && !laidCellar.lower && !laidCellar.upper) return laidCellar
+  laidCellar = cellar.svg ? layPicture(laidCellar, cellar.key, cellar.svg, cellar.height, now, layered) : noLayers
+  return laidCellar
+}
+
 /* Each journey's picture, drawn once when it is laid: its frame plays on untouched until the journey is over. */
 const journeyPictures = new Map<string, string>()
 function journeyLayers(acts: Act[]): Array<{ svg: string; height: number } | null> {
@@ -592,7 +605,7 @@ export const register: Register = (on) => {
       // and so does a click layer that is due to be laid afresh
       $.clock.every(100, () => {
         const t = Date.now()
-        let due = laid.uncoverAt > 0 && t >= laid.uncoverAt
+        let due = (laid.uncoverAt > 0 && t >= laid.uncoverAt) || (laidCellar.uncoverAt > 0 && t >= laidCellar.uncoverAt)
         if (!due && t - mendAskedAt > 1000 && [...clicks.values()].some((l) => l.failedAt && t - l.failedAt >= mendWait(l.fails, false))) {
           mendAskedAt = t
           due = true
@@ -1123,6 +1136,7 @@ export const register: Register = (on) => {
     const acts = (await read($, stage)).acts
     const d = shownNow.at ? shownNow : nextDisplay(w, shownNow, picked, now)
     const layers = roomLayers(d, now, !!Client)
+    const under = cellarLayers(w.robots, d.floors, now, !!Client)
     const journeys = journeyLayers(acts)
     const alt = `Tin Collar office: ${robots.map((r) => `${robotName(r)} ${stateWord(r)}`).join(', ')}`
     // a layer lies on the building's ground and is as wide as the pane; its source and its words never change while it plays
@@ -1142,6 +1156,8 @@ export const register: Register = (on) => {
         ) : null}
         {frame('under', layers.lower, layers.lowerHeight, true)}
         {frame('over', layers.upper, layers.upperHeight, layers.covered)}
+        {frame('cellar-under', under.lower, under.lowerHeight, true)}
+        {frame('cellar-over', under.upper, under.upperHeight, under.covered)}
         {journeys.map((j, i) => frame(`journey-${i}`, j ? j.svg : '', j ? j.height : 0, !!j))}
         {Client && hitKey ? (
           <Box position="absolute" top={0} left={0} width="100%" height="100%">

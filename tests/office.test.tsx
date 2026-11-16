@@ -209,18 +209,19 @@ test('the cellar is dark: what is down there shows only in the light of the open
   const metal = 'data-what="cellar"'
   expect(scene([main], 0)).not.toContain(rays)
   expect(scene([main], 0)).not.toContain(metal)
-  expect(buildRoom({ home: 'Office', floors: 1, robots: [main, leaver], steps: {} }, p.jumpAt! - 100)).not.toContain(metal)
   // the hatch opens for the robot that is leaving, and the light shows the ladle and its metal
   expect(scene([main, leaver], p.jumpAt! - 100)).toContain(rays)
   expect(scene([main, leaver], p.jumpAt! - 100)).toContain(metal)
   // some seconds after the splash it is dark again
-  expect(scene([main, leaver], p.splashAt! + LEAK_MS + 500)).not.toContain(rays)
-  expect(scene([main, leaver], p.splashAt! + LEAK_MS + 500)).not.toContain(metal)
-  // a splash leaves the joint between the pipe and the ladle weeping for a few seconds
+  expect(scene([main, leaver], p.splashAt! + 5000)).not.toContain(rays)
+  expect(scene([main, leaver], p.splashAt! + 5000)).not.toContain(metal)
+  // the robot going under shakes the joint between the pipe and the ladle: it weeps while the hatch is still open
   const leak = 'data-what="leak"'
   expect(scene([main], 0)).not.toContain(leak)
   expect(scene([main, leaver], p.splashAt! + 1000)).toContain(leak)
   expect(scene([main, leaver], p.splashAt! + LEAK_MS + 100)).not.toContain(leak)
+  // and the light is still there when the last drop has fallen
+  expect(scene([main, leaver], p.splashAt! + LEAK_MS - 150)).toContain(rays)
   // the metal for a new robot travels the pipe by its own glow, and is gone from the picture once it is in the printer
   const born: Robot = { ...leaver, id: 'a2', status: 'working', endedAt: undefined, spawnedAt: 50_000, seat: 0 }
   const feed = 'data-what="feed"'
@@ -484,6 +485,7 @@ test('no picture is longer than the app will draw, however many helpers are orde
 
 test("a robot's journey is a picture of its own in the pane, and redrawing the pane does not touch it", async ($, on) => {
   engine(on)
+  on('turn.complete', (() => ({ text: '' })) as never)
   await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
   await spawnExplorer($)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -496,11 +498,24 @@ test("a robot's journey is a picture of its own in the pane, and redrawing the p
   const room = await pictureIn('under')
   expect(room?.isInteractive).toBe(true)
   expect(String(room?.source)).not.toContain('data-what="arrival"')
+  // the cellar's light is a layer of its own: there is none until a robot is leaving
+  expect(await pictureIn('cellar-under')).toBeUndefined()
   // every tool call redraws the pane: the journey's picture is the very same afterwards
   await $.tool.call({ tool: 'Grep', pattern: 'router', agentId: 'a1' })
   await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/auth.ts' })
   await ui.redraw()
   expect((await pictureIn('journey-0'))?.source).toBe(journey?.source)
+  // when its work is done the hatch is laid for it, and the room's own picture knows nothing of the cellar
+  await $.turn.complete({ agentId: 'a1', reason: 'answer', answer: 'done', durationMs: 1000, isAborted: false, turnId: 't-a1' } as unknown as Parameters<typeof $.turn.complete>[0])
+  await ui.redraw()
+  const hatch = await pictureIn('cellar-under')
+  expect(hatch?.isInteractive).toBe(true)
+  expect(String(hatch?.source)).toContain('data-what="rays"')
+  expect(String((await pictureIn('under'))?.source)).not.toContain('data-what="cellar"')
+  // and it is the very same picture from one redraw to the next
+  await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/auth.ts' })
+  await ui.redraw()
+  expect((await pictureIn('cellar-under'))?.source).toBe(hatch?.source)
   await ui.unmount()
 })
 

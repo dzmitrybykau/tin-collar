@@ -1117,10 +1117,15 @@ const JOINT_X = 157 // where the pipe is bolted to the ladle
 // The cellar is dark from wall to wall. What shows in it is what the metal lights; daylight comes
 // in only through the hatch, while it stands open.
 const CELLAR = '#0b0812'
-const HATCH_LEAD_MS = 250
-const HATCH_HOLD_MS = 800
+const HATCH_LEAD_MS = 400
+// after a splash the hatch stays open until the joint has stopped weeping
+const HATCH_HOLD_MS = 2100
+// shut, the metal's glow takes this long to go
+const AFTERGLOW_MS = 700
+// the joint starts to weep this long before the splash: the robot is half under by then
+const LEAK_LEAD_MS = 100
 /** How long the joint weeps after a splash. */
-export const LEAK_MS = 3600
+export const LEAK_MS = 2000
 /* ---------- a compaction ---------- */
 /** One hop: a breath on the floor, up, down, and a breath again. */
 export const HOP_CYCLE_MS = 800
@@ -1707,13 +1712,14 @@ function cellarSvg(light: 'light' | 'spill' | 'glow'): string {
     const top = FY + 7
     const floor = GROUND_H - 4
     // the back wall, in courses of stone
-    R(g, l.wall, 0, top, W, floor - top)
+    const joints = new Px(W, GROUND_H)
     for (let k = 0; top + k * 7 < floor; k++) {
       const y0 = top + k * 7
       const y1 = Math.min(y0 + 6, floor)
-      if (y1 < floor) R(g, l.joint, 0, y1, W, 1)
-      for (let x = k % 2 ? 13 : 4; x < W; x += 18) R(g, l.joint, x, y0, 1, y1 - y0)
+      if (y1 < floor) R(joints, l.joint, 0, y1, W, 1)
+      for (let x = k % 2 ? 17 : 4; x < W; x += 26) R(joints, l.joint, x, y0, 1, y1 - y0)
     }
+    const wall = `<rect x="0" y="${top}" width="${W}" height="${floor - top}" fill="${l.wall}"/>${joints.svg()}`
     R(g, l.floor, 0, floor, W, 2)
     R(g, l.out, 0, floor + 2, W, 2)
     // the pipe that carries the metal back to the printer: riser, elbow, run, with seams that glow
@@ -1733,11 +1739,11 @@ function cellarSvg(light: 'light' | 'spill' | 'glow'): string {
     R(g, l.out, JOINT_X, PIPE_Y - 3, 4, PIPE_W + 6)
     R(g, l.pipe, JOINT_X + 1, PIPE_Y - 2, 3, PIPE_W + 4)
     R(g, l.pipeLit, JOINT_X + 1, PIPE_Y - 2, 1, PIPE_W + 4)
-    return `<g data-what="cellar">${g.svg()}</g>`
+    return `<g data-what="cellar">${wall}${g.svg()}</g>`
   })
 }
 
-/** Under the ground floor with the hatch shut: darkness, and the pipe where it comes up through the floor. */
+/** Under the ground floor with the hatch shut: darkness. */
 function basement(g: Px) {
   const top = FY + 7
   const bottom = GROUND_H
@@ -1747,10 +1753,6 @@ function basement(g: Px) {
   R(g, '#4a4f70', HOLE_X0, FY + 1, HOLE_W, 1)
   R(g, C.amber, HOLE_X0, FY, 2, 1)
   R(g, C.amber, HOLE_X0 + HOLE_W - 2, FY, 2, 1)
-  // through the floor the pipe is lit by the room
-  R(g, C.ink, PIPE_X, FY + 1, PIPE_W, top - FY - 1)
-  R(g, C.steelD, PIPE_X + 1, FY + 1, PIPE_W - 2, top - FY - 1)
-  R(g, C.steel, PIPE_X + 1, FY + 1, 1, top - FY - 1)
 }
 
 /** The metal is never still: light runs across it, and now and then a bubble comes up. */
@@ -1774,8 +1776,8 @@ const points = (list: Array<[number, number]>) => list.map(([x, y]) => `${x},${y
  * of its own much wider for an instant, far enough to show the pipe leading away. Shut again, the
  * metal's glow is the last thing to go.
  */
-function hatchSvg(tag: string, open: number, shut: number, splash: number, sec: (t: number) => number, detail: Detail): string {
-  if (sec(shut + 700) <= 0) return ''
+function hatchSvg(tag: string, open: number, shut: number, splashes: number[], sec: (t: number) => number, detail: Detail): string {
+  if (sec(shut + AFTERGLOW_MS) <= 0) return ''
   const cellarTop = FY + 7
   const floor = GROUND_H - 2
   const light = once(cellarSvg('light'))
@@ -1837,13 +1839,17 @@ function hatchSvg(tag: string, open: number, shut: number, splash: number, sec: 
     const id = `flash-${tag}${name}`
     out += during(sec(from), sec(until), `<clipPath id="${id}"><ellipse cx="${HOLE_X}" cy="146" rx="${rx}" ry="${ry}"/></clipPath><g clip-path="url(#${id})">${glow}</g>`)
   }
-  flash('a', 90, 62, splash, splash + 110)
-  flash('b', 60, 44, splash + 110, splash + 240)
+  splashes.forEach((splash, n) => {
+    flash(`a${n}`, 90, 62, splash, splash + 110)
+    flash(`b${n}`, 60, 44, splash + 110, splash + 240)
+  })
   out += during(sec(open), sec(open + SWING), stage(0))
   out += during(sec(open + SWING), sec(open + 2 * SWING), stage(1))
   out += during(sec(open + 2 * SWING), sec(shut - 2 * SWING), stage(2))
   out += during(sec(shut - 2 * SWING), sec(shut - SWING), stage(1))
   out += during(sec(shut - SWING), sec(shut), stage(0))
+  // each robot that goes under shakes the joint where the pipe meets the ladle: it weeps while there is light to see it by
+  for (const splash of splashes) out += leakSvg(splash - LEAK_LEAD_MS, sec, detail)
   // shut: a puff of dust at the floor, and the metal's glow, which goes last
   const dust = sprite(W, GROUND_H, [0, 0.15], [0.15, 0.15], detail, (g, t) => {
     const k = t > 0 ? 1 : 0
@@ -1858,7 +1864,7 @@ function hatchSvg(tag: string, open: number, shut: number, splash: number, sec: 
   const ember = new Px(W, GROUND_H)
   R(ember, '#7a2f12', HOLE_X - 19, MELT_Y, 39, 1)
   R(ember, '#c2571d', HOLE_X - 14, MELT_Y, 29, 1)
-  out += during(sec(shut + 320), sec(shut + 700), ember.svg())
+  out += during(sec(shut + 320), sec(shut + AFTERGLOW_MS), ember.svg())
   return out
 }
 
@@ -1905,7 +1911,9 @@ function feedSvg(tag: string, spawnedAt: number, feedEnd: number, sec: (t: numbe
     `<clipPath id="${id}"><circle r="11"/></clipPath>` +
     `<g clip-path="url(#${id})" transform="translate(${s2(x0)} ${s2(y0)})">${along(0, 0)}<g transform="translate(${s2(-x0)} ${s2(-y0)})">${along(0, 0, -1)}${once(cellarSvg('glow'))}</g></g>`
   const moving = `<g transform="translate(${s2(x0 - 5)} ${s2(y0 - 5)})">${along(-5, -5)}${bubble.svg()}</g>`
-  return `<g data-what="feed">${during(sec(spawnedAt), sec(feedEnd), patch + moving)}</g>`
+  // it goes up through the cellar's ceiling into the printer: above the ceiling it is out of sight
+  const under = `<clipPath id="under-${tag}"><rect x="0" y="${FY + 7}" width="${W}" height="${GROUND_H - FY - 7}"/></clipPath>`
+  return `<g data-what="feed">${during(sec(spawnedAt), sec(feedEnd), `${patch}${under}<g clip-path="url(#under-${tag})">${moving}</g>`)}</g>`
 }
 
 function paintUpper(floor: number): Px {
@@ -2503,20 +2511,32 @@ function walkLegs(pts: Pt[], cum: number[], startAt: number, now: number, frames
   return out
 }
 
-/** A splash shakes the joint where the pipe meets the ladle: a seam glows, drops fall, a small pool gathers. */
-function leakSvg(detail: Detail): string {
+/**
+ * A robot going under shakes the joint where the pipe meets the ladle: the seam glows and two
+ * drops fall from it, one after the other, into a small pool. It starts when the robot is half
+ * under and is over before the hatch shuts, so there is light to see it by.
+ */
+function leakSvg(from: number, sec: (t: number) => number, detail: Detail): string {
+  if (detail >= 2) return ''
   const y0 = PIPE_Y + PIPE_W + 2
   const pool = GROUND_H - 3 - y0
-  const drip = sprite(9, pool + 1, [0, 0.25, 0.5, 0.75], [0.25, 0.25, 0.25, 0.25], detail, (g, t) => {
-    const k = Math.round(t / 0.25)
+  // a drop gathers at the seam, falls, and lands in a small pool
+  const frame = (k: number, pooled: boolean) => {
+    const g = new Px(9, pool + 1)
     R(g, '#ffd166', 3, 0, 2, 1)
     if (k === 0) R(g, '#ffd166', 4, 1, 1, 1)
     else if (k === 1) R(g, '#ffd166', 4, 2, 1, 2)
     else if (k === 2) R(g, '#ffb347', 4, 4, 1, 2)
-    R(g, '#ff8a2a', 1, pool, 7, 1)
-    R(g, k === 3 ? '#fff1a8' : '#ffd166', 3, pool, 3, 1)
-  })
-  return `<g data-what="leak">${at(JOINT_X - 2, y0, drip)}</g>`
+    if (pooled) {
+      R(g, '#ff8a2a', 1, pool, 7, 1)
+      R(g, k === 3 ? '#fff1a8' : '#ffd166', 3, pool, 3, 1)
+    }
+    return at(JOINT_X - 2, y0, g.svg())
+  }
+  const step = LEAK_MS / 8
+  let out = ''
+  for (let n = 0; n < 8; n++) out += during(sec(from + n * step), sec(from + (n + 1) * step), frame(n % 4, n >= 3))
+  return out ? `<g data-what="leak">${out}</g>` : ''
 }
 
 /* The bolts of a pile in the order they land: where each lies in the pile's own box, and which kind it is. */
@@ -2612,6 +2632,9 @@ export const LEAVING_LEAD_MS = 1000
 /** ...and the room lets go of it here. */
 export const ROOM_OUT_MS = 300
 
+/** When a leaving is quite over: the robot is gone, the hatch is shut and the cellar is dark again. */
+const leavingOver = (p: Phase) => Math.max(p.goneAt ?? 0, (p.splashAt ?? 0) + HATCH_HOLD_MS + AFTERGLOW_MS)
+
 /** When the room draws a robot at its desk: still at first, then at work, then still again before it leaves. */
 export type Stay = { from: number; live: number; still: number | null; until: number | null }
 export function stayOf(p: Phase): Stay {
@@ -2623,8 +2646,8 @@ export function stayOf(p: Phase): Stay {
 
 /**
  * Where a robot is in the room's picture, as a number that only goes up: 0 waiting for the printer,
- * 1 being printed, 2 on its way, 3 sat down and still, 4 at work, 5 still again, 6 on its way out,
- * 7 gone with the pipe's joint still weeping, 8 gone. The room is drawn afresh after each step.
+ * 1 being printed, 2 on its way, 3 sat down and still, 4 at work, 5 still again, 6 on its way out
+ * and until the hatch has shut behind it, 8 gone. The room is drawn afresh after each step.
  */
 export function stageOf(r: Robot, floors: number, now: number): number {
   // the main agent is always at its desk
@@ -2635,7 +2658,7 @@ export function stageOf(r: Robot, floors: number, now: number): number {
   if (now < r.spawnedAt) return 0
   if (now < p.printEnd) return 1
   if (now < s.from) return 2
-  if (s.until !== null && now >= s.until) return p.goneAt !== null && now >= p.goneAt ? (p.splashAt !== null && now < p.splashAt + LEAK_MS ? 7 : 8) : 6
+  if (s.until !== null && now >= s.until) return p.goneAt !== null && now >= leavingOver(p) ? 8 : 6
   if (s.still !== null && now >= s.still) return 5
   return now < s.live ? 3 : 4
 }
@@ -2746,7 +2769,7 @@ function arrivalSvg(r: Robot, floors: number, now: number, plateFrom: number, de
 function leavingSvg(r: Robot, floors: number, now: number, selected: string, detail: Detail): string {
   const p = phaseOf(r, floors)
   if (!p || p.workEnd === null || p.leaveAt === null || p.handAt === null || p.toHoleAt === null || p.jumpAt === null || p.splashAt === null || p.goneAt === null) return ''
-  if (p.goneAt <= now) return ''
+  if (leavingOver(p) <= now) return ''
   const sec = (t: number) => (t - now) / 1000
   const gy = floors * FLOOR_H
   const groundY = gy + FY
@@ -2788,9 +2811,6 @@ function leavingSvg(r: Robot, floors: number, now: number, selected: string, det
   // a few steps to the hatch, which opens and lets the light into the pit; a hop, and down into the vat
   const toHole: Pt[] = [[DELIVER_X, groundY], [HOLE_X, groundY]]
   out += walkLegs(toHole, timings(toHole), p.toHoleAt, now, walker('walk', 'happy'))
-  const opened = p.jumpAt - HATCH_LEAD_MS
-  const shut = p.splashAt + HATCH_HOLD_MS
-  out += at(0, gy, hatchSvg(r.id.replace(/[^a-zA-Z0-9]/g, ''), opened, shut, p.splashAt, sec, detail))
   const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'cheer', eyes: 'happy', girth }))
   const a = `${HOLE_X - 13} ${groundY - 32}`
   const values = `${a};${HOLE_X - 13} ${groundY - 41};${HOLE_X - 13} ${gy + MELT_Y + 12 - 32}`
@@ -2918,20 +2938,13 @@ function roomSvg(world: World, now: number, selected: string, detail: Detail): s
     }
   }
 
-  // each splash leaves the pipe's joint weeping
-  if (detail < 2)
-    for (const r of subs) {
-      const splash = phaseOf(r, floors)?.splashAt ?? null
-      if (splash !== null && splash + LEAK_MS > now) out += at(0, gy, during(sec(splash + 250), sec(splash + LEAK_MS), cached(`leak:${detail}`, () => leakSvg(detail))))
-    }
-
   // the main robot and its cloud
   if (main) {
     const kind = main.activity.kind
     // with helpers still about, an idle main agent stays awake and the lights stay on
     const helpers = subs.some((r) => {
       const p = phaseOf(r, floors)
-      return !!p && (p.goneAt === null || p.goneAt > now)
+      return !!p && (p.goneAt === null || leavingOver(p) > now)
     })
     // a compaction: the main agent is up from its chair, hopping and shedding bolts like anyone else, for as long as it runs
     const shed = shedSpan(main, now)
@@ -2998,6 +3011,45 @@ export function buildRoom(world: World, now: number, selected = ''): string {
   return fitted(sceneHeight(world.floors), (detail) => roofSvg() + at(0, ROOF_H, roomSvg(world, now, selected, detail)))
 }
 
+/** A stretch for which the hatch stands open: for one robot, or for several that follow close on each other. */
+export type Drop = { open: number; shut: number; splashes: number[] }
+
+/**
+ * When the hatch opens and shuts for the robots that are leaving, with every stretch that is not
+ * yet quite over at `now`. A stretch is the same from the moment its robots are known until the
+ * cellar is dark again, so its picture can be laid once and left to play.
+ */
+export function hatchDrops(robots: Robot[], floors: number, now: number): Drop[] {
+  const drops: Drop[] = []
+  const leaving = robots
+    .filter((r) => r.type !== 'main')
+    .map((r) => phaseOf(r, floors))
+    .filter((p): p is Phase => !!p && p.jumpAt !== null && p.splashAt !== null)
+  for (const p of leaving.sort((a, b) => a.jumpAt! - b.jumpAt!)) {
+    const open = p.jumpAt! - HATCH_LEAD_MS
+    const shut = p.splashAt! + HATCH_HOLD_MS
+    const last = drops[drops.length - 1]
+    if (last && open <= last.shut) {
+      last.shut = Math.max(last.shut, shut)
+      last.splashes.push(p.splashAt!)
+    } else drops.push({ open, shut, splashes: [p.splashAt!] })
+  }
+  return drops.filter((d) => d.shut + AFTERGLOW_MS > now)
+}
+
+/** The hatch and what its light shows, in building coordinates. */
+function hatchesSvg(drops: Drop[], floors: number, now: number, detail: Detail): string {
+  const sec = (t: number) => (t - now) / 1000
+  return drops.map((d, i) => at(0, floors * FLOOR_H, hatchSvg(`h${i}`, d.open, d.shut, d.splashes, sec, detail))).join('')
+}
+
+/** The cellar's light at `now`, on nothing: a layer of its own over the room, so the room's picture stays as light as it was. */
+export function buildCellar(drops: Drop[], floors: number, now: number): string {
+  if (!drops.length) return ''
+  loopAt = now
+  return fitted(sceneHeight(floors), (detail) => at(0, ROOF_H, hatchesSvg(drops, floors, now, detail)))
+}
+
 /** What a journey's picture is drawn from: the robot as it was when its journey was laid. */
 export type Journey = { kind: 'in' | 'out'; robot: Robot; floors: number; plateFrom: number; selected?: string }
 
@@ -3014,7 +3066,7 @@ export function journeyEnd(j: Journey): number {
   const p = phaseOf(j.robot, j.floors)
   if (!p) return 0
   // a leaving is over when the cellar is dark again
-  return j.kind === 'in' ? p.arriveAt + ARRIVAL_KEPT_MS : Math.max(p.goneAt ?? 0, (p.splashAt ?? 0) + HATCH_HOLD_MS + 700) + 100
+  return j.kind === 'in' ? p.arriveAt + ARRIVAL_KEPT_MS : leavingOver(p) + 100
 }
 
 /** The whole building at `now` in one picture, journeys and all: for stills and for surfaces that draw one layer. */
@@ -3024,7 +3076,7 @@ export function buildScene(world: World, now: number, selected = ''): string {
   return fitted(sceneHeight(world.floors), (detail) => {
     let journeys = ''
     for (const r of subs) journeys += arrivalSvg(r, world.floors, now, plateFromOf(r, subs, world.floors), detail) + leavingSvg(r, world.floors, now, selected, detail)
-    return roofSvg() + at(0, ROOF_H, roomSvg(world, now, selected, detail) + journeys)
+    return roofSvg() + at(0, ROOF_H, roomSvg(world, now, selected, detail) + hatchesSvg(hatchDrops(world.robots, world.floors, now), world.floors, now, detail) + journeys)
   })
 }
 

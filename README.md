@@ -24,7 +24,7 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 - **The metal comes back.** When the next robot is ordered, a slug of metal leaves the ladle and travels the pipe in the dark, lighting it as it goes, up into the printer, whose vents glow while the robot is built.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
 - **A stuck robot overheats.** When three of an agent's tool calls fail in a row, its robot turns red, lets off steam at the ears and its screen fills with red; its card says how many have failed. The first call that works cools it down.
-- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same, and on its monitor stands a pressure gauge: the needle shows how near its context is to the point where Claude compacts it, and a lamp blinks when it is in the red.
+- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same, and its monitor has a gauge built into the case beside the screen: a column that rises as its context nears the point where Claude compacts it, tipped with amber and then with red, and blinking once it stands in the red.
 - **Work piles up.** For every file an agent changes, a sheet lands on the stack of papers beside its desk.
 - **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. While its helpers work, an idle main agent takes a coffee break; in an empty office it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
 
@@ -55,8 +55,10 @@ Each robot is painted and dressed for its role, keeps a thing of its own on its 
 ## On the wall
 
 - **The sign** carries the name of the folder the session works in.
-- **Employee of the Day** is a gilt frame with the portrait of the robot that has used the most tokens today, and its share of the day's total.
-- **The whiteboard** charts tokens per day for the last seven days, across all your chats.
+- **Employee of the Day** is a plate with the portrait of the robot that has used the most tokens today, what it is, and how many it has used.
+- **Tokens/day** is the plate beside it: a bar for each of the last seven days, across all your chats, with today's in amber.
+
+Both plates are made the way the sign is: the same wood and lettering across the head, over a dark face. Everything in the office that shows a number follows one code: cream is what you read first, teal is a quantity, amber is today's or a warning, red is what needs minding.
 
 ## Under the picture
 

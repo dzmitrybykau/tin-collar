@@ -103,7 +103,7 @@ export type World = {
   robots: Robot[]
   steps: Record<string, Step[]>
   tokens?: TokenTally
-  /** Tokens per day from the other chats, read from the plugin's store, for the whiteboard's chart. */
+  /** Tokens per day from the other chats, read from the plugin's store, for the tokens plate on the wall. */
   history?: Record<string, number>
   /** The size the main agent's context is compacted at: the red line on its gauge. */
   limit?: number

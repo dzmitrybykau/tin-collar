@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { ARRIVAL_KEPT_MS, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartRows, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, gaugeStep, girthOf, isOverheated, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
+import { ARRIVAL_KEPT_MS, BAR_MAX, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartBars, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, GAUGE_ROWS, gaugeInRed, gaugeLevel, girthOf, isOverheated, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -259,7 +259,7 @@ test('the employee of the day is whoever used the most tokens today', async () =
   expect(addTokens(tally, { id: 'main', role: 'main', name: 'Main agent' }, 5, tomorrow).total).toBe(5)
 })
 
-test('the whiteboard charts tokens per day across every chat', () => {
+test('the tokens plate charts tokens per day across every chat', () => {
   const today = new Date(2026, 10, 11, 9).getTime()
   const days = lastDays(today, 3)
   expect(days).toEqual(['2026-11-9', '2026-11-10', '2026-11-11'])
@@ -268,11 +268,18 @@ test('the whiteboard charts tokens per day across every chat', () => {
   const mine = addTokens(undefined, { id: 'main', role: 'main', name: 'Main agent' }, 300, today)
   const daily = dailyTotals(mine, { [days[0]!]: 800, [days[1]!]: 400, [days[2]!]: 100 }, today, 3)
   expect(daily).toEqual([800, 400, 400])
-  // the busiest day is drawn highest, and equal days level
-  const rows = chartRows(daily)
-  expect(rows[0]!).toBeLessThan(rows[1]!)
-  expect(rows[1]).toBe(rows[2])
-  expect(chartRows([0, 0, 0])).toEqual([16, 16, 16])
+  // the busiest day's bar stands tallest, at full height, and equal days level
+  const bars = chartBars(daily)
+  expect(bars[0]).toBe(BAR_MAX)
+  expect(bars[1]!).toBeLessThan(bars[0]!)
+  expect(bars[1]).toBe(bars[2])
+  // a day with nothing in it has no bar, and a day with next to nothing still has a row
+  expect(chartBars([0, 0, 0])).toEqual([0, 0, 0])
+  expect(chartBars([1_000_000, 1, 0])).toEqual([BAR_MAX, 1, 0])
+  // both plates on the wall are of one make, each with its name on its head
+  const main = helper('main', -1, -99_999, { type: 'main' })
+  const wall = buildRoom({ home: 'Office', floors: 0, robots: [main], steps: {}, tokens: mine, history: { [days[0]!]: 800 } }, today)
+  expect(wall.split('data-what="plate"').length - 1).toBe(2)
   // each chat's key in the store names its day
   expect(dayOfKey(tokensKey('2026-11-11', 'abc'))).toBe('2026-11-11')
   expect(dayOfKey('other')).toBeNull()
@@ -552,18 +559,22 @@ test('a robot whose tool calls keep failing overheats, and cools with the first 
 
 test("the main agent's gauge shows how near its context is to being compacted", () => {
   // nothing to show before anything is known
-  expect(gaugeStep(undefined, 160_000)).toBe(0)
-  expect(gaugeStep(80_000, undefined)).toBe(0)
-  // the needle goes round with the context, and stops at the end of the scale
-  expect(gaugeStep(20_000, 160_000)).toBe(1)
-  expect(gaugeStep(80_000, 160_000)).toBe(4)
-  expect(gaugeStep(150_000, 160_000)).toBe(8)
-  expect(gaugeStep(400_000, 160_000)).toBe(8)
+  expect(gaugeLevel(undefined, 160_000)).toBe(0)
+  expect(gaugeLevel(80_000, undefined)).toBe(0)
+  // the column rises with the context, and stops at the top of the scale
+  expect(gaugeLevel(10_000, 160_000)).toBe(1)
+  expect(gaugeLevel(80_000, 160_000)).toBe(Math.round(GAUGE_ROWS / 2))
+  expect(gaugeLevel(160_000, 160_000)).toBe(GAUGE_ROWS)
+  expect(gaugeLevel(400_000, 160_000)).toBe(GAUGE_ROWS)
+  // the top of the scale is the red zone
+  expect(gaugeInRed(gaugeLevel(80_000, 160_000))).toBe(false)
+  expect(gaugeInRed(gaugeLevel(150_000, 160_000))).toBe(true)
   const main = helper('main', -1, -99_999, { type: 'main', context: 150_000 })
   const room = (limit: number | undefined) => buildRoom({ home: 'Office', floors: 0, robots: [main], steps: {}, limit }, 0)
   expect(room(160_000)).toContain('data-what="gauge"')
-  // in the red its needle changes, and so the picture
-  expect(room(160_000)).not.toBe(room(1_000_000))
+  // in the red the column blinks; lower down it stands still
+  const moving = (svg: string) => svg.split('<animate').length
+  expect(moving(room(160_000))).toBeGreaterThan(moving(room(1_000_000)))
 })
 
 test('the files the agents change are listed with who changed them, and a click shows the latest change', async ($, on) => {

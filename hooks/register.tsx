@@ -5,7 +5,7 @@ import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'cl
 
 import type { Act, Activity, ActivityKind, Change, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildCellar, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, gaugeStep, girthOf, hasStoodUp, hatchDrops, hitTest, isOverheated, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
+import { avatarSvg, buildCellar, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartBars, directJourneys, exitSlot, failClick, floorsFor, gaugeLevel, girthOf, hasStoodUp, hatchDrops, hitTest, isOverheated, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
 import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
@@ -17,7 +17,7 @@ const SWAP_GAP_MS = 350
 const PUBLISH_EVERY_MS = 250
 // how many journeys can be on at once, each in a layer of its own
 const ACT_SLOTS = 14
-// the whiteboard's chart re-reads every chat's totals once a minute, and keeps two weeks of them
+// the tokens plate re-reads every chat's totals once a minute, and keeps two weeks of them
 const HISTORY_EVERY_MS = 60_000
 const HISTORY_DAYS = 14
 const LIST_KEEP_MS = 120_000
@@ -311,13 +311,13 @@ const visualKey = (d: Display, now: number) =>
     d.floors,
     d.selected,
     frameKey(d, now),
-    chartRows(dailyTotals(d.tokens, d.history, now, CHART_DAYS)),
+    chartBars(dailyTotals(d.tokens, d.history, now, CHART_DAYS)),
     // the window follows the hour of the picture's own moment
     skyKey(d.at),
     // where each robot is: the room is drawn afresh once a change it had coming has played
     shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now), stageOf(r, d.floors, now), isOverheated(r), r.papers ?? 0]),
-    // the needle of the main agent's gauge
-    gaugeStep(d.robots.find((r) => r.type === 'main')?.context, d.limit),
+    // how high the main agent's gauge stands
+    gaugeLevel(d.robots.find((r) => r.type === 'main')?.context, d.limit),
   ])
 const structureKey = (d: Display, now: number) =>
   JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt, r.endedAt ?? 0, r.exitAt ?? 0])])

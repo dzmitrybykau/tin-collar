@@ -1096,13 +1096,14 @@ const GROUND_DESKS = [
   { robot: 196, bubble: { x: 180, y: 54 } },
 ]
 const UPPER_X = [20, 64, 108, 152, 196]
-// The wall: the chat's sign up top, the whiteboard with the token chart on the right, and the
-// Employee of the Day frame hung right under the sign, its top level with the whiteboard's.
+// The wall: the chat's sign up top, and under it a row of two plates of one make: the Employee
+// of the Day right under the sign, and the tokens of the last week to its right.
 const SIGN_CX = 128
 const SIGN_Y = 9
 const SIGN_H = 11
-const BOARD = { x: 176, y: 24, w: 46, h: 25 }
-const FRAME = { x: SIGN_CX - 35, y: BOARD.y, w: 70, h: BOARD.h }
+const PLATE_GAP = 6
+const FRAME = { x: SIGN_CX - 42, y: 24, w: 84, h: 25 }
+const BOARD = { x: FRAME.x + FRAME.w + PLATE_GAP, y: FRAME.y, w: 50, h: FRAME.h }
 const WALL_SHADOW = '#2a4656'
 // The recycling corner: a hatch in the floor drops onto a ladle of molten metal,
 // which a pipe carries back to the printer.
@@ -1192,70 +1193,105 @@ export function seatFor(seat: number, floors: number): Seat | null {
   return { x, y: fy - 6, floorY: fy, floor, monX: x + 10, monY: fy - 17, bubble: { x: Math.max(2, Math.min(W - 34, x - 20)), y: fy - 43 } }
 }
 
-/**
- * A wooden stool in the desks' own wood and outline, seen from the side. Its top is the row under
- * a seated robot (fy - 5), so the robot's body rests right on it; `w` matches the robot's width.
+/* ---------- the workplaces ---------- */
+/*
+ * Every workplace is put together from the same few parts, whoever sits at it: a seat on a steel
+ * pedestal, a desk of a lit wooden top on one leg and a chest of two drawers, and a monitor in a
+ * dark case. The main agent's are the same parts made larger, with a back to its chair. Brass is
+ * kept for what a hand takes hold of.
  */
-function stool(g: Px, x: number, fy: number, w: number) {
+const BRASS = '#f3d57a'
+const LEATHER = '#8a3340'
+const LEATHER_L = '#b85562'
+
+/** What a seat stands on: a steel pedestal on a foot. `top` is the seat's upper row; the foot rests on the floor two rows under the seat. */
+function pedestal(g: Px, x: number, top: number, reach: number) {
+  R(g, C.ink, x - 1, top + 3, 2, 1)
+  R(g, C.ink, x - reach, top + 4, reach * 2, 1)
+  R(g, C.steelD, x - reach, top + 4, 1, 1)
+  R(g, C.steelD, x + reach - 1, top + 4, 1, 1)
+}
+
+/**
+ * A helper's chair, seen from the side: a wooden seat with a low back. The seat's top is the row
+ * under a seated robot (fy - 5), so the robot's body rests right on it; `w` matches the robot's width.
+ */
+function chair(g: Px, x: number, fy: number, w: number) {
   const x0 = x - (w >> 1)
   const top = fy - 5
+  // the back, as high as a seated robot's shoulders
+  R(g, C.ink, x0 - 2, top - 7, 3, 8)
+  R(g, C.wood, x0 - 1, top - 6, 1, 6)
+  R(g, C.woodL, x0 - 1, top - 6, 1, 1)
   R(g, C.ink, x0, top, w, 3)
   R(g, C.woodL, x0 + 1, top, w - 2, 1)
   R(g, C.wood, x0 + 1, top + 1, w - 2, 1)
-  // two splayed legs
-  for (const [lx, out] of [[x0 + 1, -1], [x0 + w - 3, 1]] as const) {
-    R(g, C.ink, lx, top + 3, 2, 1)
-    R(g, C.ink, lx + out, top + 4, 2, 1)
-    R(g, C.woodD, lx + (out > 0 ? 0 : 1), top + 3, 1, 1)
-  }
+  pedestal(g, x, top, 4)
 }
 
-/** The main agent's chair: leather, with a high buttoned back, on a pedestal. Its seat is where a stool's top would be. */
+/** The main agent's chair: the same seat in leather, with a high buttoned back. */
 function bossChair(g: Px, x: number, fy: number) {
   const top = fy - 5
-  const L = '#8a3340'
   // the back, up to the top of the head
   R(g, C.ink, x - 9, top - 14, 3, 1)
   R(g, C.ink, x - 10, top - 13, 5, 14)
-  R(g, L, x - 9, top - 13, 3, 13)
-  R(g, '#b85562', x - 9, top - 13, 1, 13)
-  for (let j = top - 11; j < top - 1; j += 4) R(g, C.amber, x - 8, j, 1, 1)
-  // the seat, the pedestal and its feet
+  R(g, LEATHER, x - 9, top - 13, 3, 13)
+  R(g, LEATHER_L, x - 9, top - 13, 1, 13)
+  for (let j = top - 11; j < top - 1; j += 4) R(g, BRASS, x - 8, j, 1, 1)
   R(g, C.ink, x - 7, top, 13, 3)
-  R(g, '#b85562', x - 6, top, 11, 1)
-  R(g, L, x - 6, top + 1, 11, 1)
-  R(g, C.ink, x - 1, top + 3, 2, 1)
-  R(g, C.ink, x - 5, top + 4, 10, 1)
-  R(g, C.steelD, x - 5, top + 4, 1, 1)
-  R(g, C.steelD, x + 4, top + 4, 1, 1)
+  R(g, LEATHER_L, x - 6, top, 11, 1)
+  R(g, LEATHER, x - 6, top + 1, 11, 1)
+  pedestal(g, x, top, 5)
 }
 
-/** A workstation for a robot sitting at x: stool, desk with drawers, PC, monitor, keyboard. */
+/** A desk from x0 to x1 on a floor at fy: a lit top, a leg at its near end, and a chest of two drawers `chest` wide at the far one. */
+function desk(g: Px, x0: number, x1: number, fy: number, chest: number) {
+  const w = x1 - x0 + 1
+  R(g, C.ink, x0, fy - 9, w, 3)
+  R(g, C.woodL, x0 + 1, fy - 9, w - 2, 1)
+  R(g, C.wood, x0 + 1, fy - 8, w - 2, 1)
+  R(g, C.ink, x0 + 2, fy - 6, 2, 6)
+  // the chest: each drawer has a lit upper edge and a brass pull
+  const cx = x1 - 1 - chest
+  R(g, C.ink, cx, fy - 6, chest + 1, 6)
+  for (const y of [fy - 6, fy - 3]) {
+    R(g, C.wood, cx + 1, y, chest - 1, 1)
+    R(g, C.woodD, cx + 1, y + 1, chest - 1, 1)
+    const pull = chest > 8 ? 4 : 2
+    R(g, BRASS, cx + 1 + ((chest - 1 - pull) >> 1), y + 1, pull, 1)
+  }
+}
+
+/** A monitor's case w by h with its neck, standing on a desk; the screen inside it is drawn live. */
+function monitor(g: Px, x: number, y: number, w: number, h: number) {
+  R(g, C.ink, x, y, w, h)
+  R(g, C.panel, x + 1, y + 1, w - 2, h - 2)
+  R(g, C.panel2, x + 1, y + 1, w - 2, 1)
+  R(g, C.scr, x + 2, y + 2, w - 4, h - 4)
+  const neck = w > 16 ? 5 : 3
+  R(g, C.ink, x + ((w - neck) >> 1), y + h, neck, w > 16 ? 2 : 1)
+}
+
+/** A keyboard w wide, lying on a desk whose lit top is the row under it. */
+function keyboard(g: Px, x: number, y: number, w: number) {
+  R(g, C.ink, x, y, w, 2)
+  R(g, C.steelL, x + 1, y, w - 2, 1)
+}
+
+// The main agent's desk and the monitor on it, in ground coordinates.
+const MAIN_DESK = { x0: 115, x1: 159 }
+const MAIN_MON = { x: 131, y: 86, w: 28, h: 19 }
+const MAIN_SCREEN = { x: MAIN_MON.x + 2, y: MAIN_MON.y + 2, w: 19, h: MAIN_MON.h - 4 }
+// The context gauge's column, in a bay of the monitor's case beside the screen: a row for each row of the screen.
+const GAUGE = { x: MAIN_SCREEN.x + MAIN_SCREEN.w + 1, y: MAIN_SCREEN.y, w: 4 }
+export const GAUGE_ROWS = MAIN_SCREEN.h
+
+/** A workstation for a robot sitting at x: chair, desk, monitor, keyboard. */
 function workstation(g: Px, x: number, fy: number) {
-  const top = fy - 8
-  stool(g, x, fy, 10)
-  // desk top and frame
-  R(g, C.ink, x + 3, top - 1, 19, 3)
-  R(g, C.woodL, x + 4, top - 1, 17, 1)
-  R(g, C.wood, x + 4, top, 17, 1)
-  R(g, C.ink, x + 4, top + 2, 2, fy - top - 2)
-  // a slim drawer unit
-  R(g, C.ink, x + 15, top + 2, 6, fy - top - 2)
-  R(g, C.woodD, x + 16, top + 2, 4, fy - top - 3)
-  R(g, C.wood, x + 16, top + 2, 4, 1)
-  R(g, C.steelL, x + 17, top + 4, 2, 1)
-  // a PC under the desk
-  R(g, C.ink, x + 8, fy - 5, 5, 5)
-  R(g, '#3b4262', x + 9, fy - 4, 3, 4)
-  R(g, C.green, x + 10, fy - 3, 1, 1)
-  // monitor; the screen is drawn live
-  R(g, C.ink, x + 8, top - 11, 11, 9)
-  R(g, '#2b3049', x + 9, top - 10, 9, 7)
-  R(g, C.scr, x + 10, top - 9, 7, 5)
-  R(g, C.ink, x + 12, top - 2, 3, 1)
-  // keyboard
-  R(g, C.ink, x + 3, top - 3, 5, 2)
-  R(g, C.steelL, x + 4, top - 3, 3, 1)
+  chair(g, x, fy, 10)
+  desk(g, x + 3, x + 22, fy, 7)
+  monitor(g, x + 8, fy - 19, 11, 9)
+  keyboard(g, x + 3, fy - 11, 5)
 }
 
 /**
@@ -1406,28 +1442,29 @@ function sign(g: Px, name: string, face: string, ink: string, lit?: string) {
   tx(g, name, x + 4, SIGN_Y + 3, ink)
 }
 
-/** The whiteboard on the wall, with its marker tray; the token chart on it is drawn live. */
-function whiteboard(g: Px) {
-  const { x, y, w } = BOARD
-  const bh = BOARD.h - 3
-  R(g, WALL_SHADOW, x + 1, y + 1, w, bh)
-  R(g, C.ink, x, y, w, bh)
-  R(g, C.steelL, x + 1, y + 1, w - 2, bh - 2)
-  R(g, C.steel, x + 1, y + bh - 2, w - 2, 1)
-  R(g, C.steel, x + w - 2, y + 1, 1, bh - 2)
-  R(g, C.page, x + 2, y + 2, w - 4, bh - 4)
-  // the tray, with two markers and an eraser on it
-  R(g, WALL_SHADOW, x + 3, y + bh + 3, w - 4, 1)
-  R(g, C.ink, x + 1, y + bh, w - 2, 3)
-  R(g, C.steelL, x + 2, y + bh, w - 4, 1)
-  R(g, C.steel, x + 2, y + bh + 1, w - 4, 1)
-  for (const [mx, body] of [[x + 5, C.blue], [x + 15, C.red]] as const) {
-    R(g, C.ink, mx, y + bh - 3, 9, 3)
-    R(g, body, mx + 1, y + bh - 2, 5, 1)
-    R(g, C.steelL, mx + 6, y + bh - 2, 2, 1)
-  }
-  R(g, C.ink, x + w - 13, y + bh - 3, 9, 3)
-  R(g, C.woodL, x + w - 12, y + bh - 2, 7, 1)
+/* ---------- the plates on the wall ---------- */
+/*
+ * What the office shows of itself is all made one way. A plate is a board of the sign's own wood
+ * with its name across the head in the sign's own lettering, and a dark face let into it, the
+ * same glass as every monitor's. On a face cream is what is read first, steel is what goes with
+ * it, teal is a quantity, amber is today's, and red is what must be minded.
+ */
+type Rect = { x: number; y: number; w: number; h: number }
+const HEAD_H = 8 // a lit row, a row clear, five of lettering, a row clear
+
+/** A plate w by h with its name on its head; what comes back is its face, to be drawn on. */
+function plate(g: Px, x: number, y: number, w: number, h: number, name: string): Rect {
+  R(g, WALL_SHADOW, x + 1, y + 1, w, h)
+  R(g, C.ink, x, y, w, h)
+  R(g, C.woodD, x + 1, y + 1, w - 2, h - 2)
+  R(g, C.wood, x + 1, y + 1, w - 2, 1)
+  tx(g, name, x + ((w - tw(name)) >> 1), y + 3, C.cream)
+  // a brass pin at each end of the head
+  R(g, BRASS, x + 2, y + 5, 1, 1)
+  R(g, BRASS, x + w - 3, y + 5, 1, 1)
+  const face = { x: x + 2, y: y + 1 + HEAD_H, w: w - 4, h: h - HEAD_H - 3 }
+  R(g, C.scr, face.x, face.y, face.w, face.h)
+  return face
 }
 
 /* ---------- the window over the printer: the sky as this computer's clock has it ---------- */
@@ -1515,23 +1552,19 @@ function paintGround(home: string): Px {
   R(g, C.woodD, 0, 0, W, 5)
   R(g, C.wood, 0, 4, W, 1)
   R(g, C.ink, 0, 5, W, 1)
-  // the chat's sign, and the whiteboard where the token chart is drawn
+  // the chat's sign; the plates under it are drawn live
   sign(g, fit(home || 'OFFICE', 96), C.woodD, C.cream, C.wood)
-  whiteboard(g)
-  // main desk, monitor, keyboard, stool
-  R(g, C.ink, 115, 107, 44, 3)
-  R(g, C.woodL, 116, 107, 42, 1)
-  R(g, C.wood, 116, 108, 42, 1)
-  R(g, C.ink, 117, 110, 3, 6)
-  R(g, C.ink, 141, 110, 17, 6)
-  R(g, C.woodD, 142, 110, 15, 5)
-  R(g, C.wood, 142, 110, 15, 1)
-  R(g, C.steelL, 148, 112, 3, 1)
-  R(g, C.ink, 131, 86, 27, 19)
-  R(g, C.panel, 132, 87, 25, 17)
-  R(g, C.ink, 142, 105, 5, 2)
-  R(g, C.ink, 117, 105, 13, 2)
-  R(g, C.steelL, 118, 105, 11, 1)
+  // the main agent's workplace: the helpers' own parts, made larger
+  desk(g, MAIN_DESK.x0, MAIN_DESK.x1, FY, 17)
+  monitor(g, MAIN_MON.x, MAIN_MON.y, MAIN_MON.w, MAIN_MON.h)
+  // the gauge's bay: a bar of the case between the screen and it, and the marks of its scale on the case beside it
+  R(g, C.panel, GAUGE.x - 1, MAIN_SCREEN.y, 1, MAIN_SCREEN.h)
+  for (let k = 0; k < GAUGE_ROWS; k++) {
+    const z = gaugeZone(k)
+    if (z > 0) R(g, GAUGE_LIT[z]!, GAUGE.x + GAUGE.w, GAUGE.y + GAUGE_ROWS - 1 - k, 1, 1)
+    else if (k % 4 === 3) R(g, C.steelD, GAUGE.x + GAUGE.w, GAUGE.y + GAUGE_ROWS - 1 - k, 1, 1)
+  }
+  keyboard(g, 117, FY - 11, 13)
   bossChair(g, MAIN_X, FY)
   // a warning sign over the recycling hatch
   R(g, C.ink, 175, 86, 9, 8)
@@ -1554,55 +1587,41 @@ function paintGround(home: string): Px {
   return g
 }
 
-const GOLD = '#d4a83a'
-const GOLD_L = '#f3d57a'
-const GOLD_D = '#8f6b1c'
-const VELVET = '#1d2238'
-
 /**
- * Employee of the Day: a gilt frame under the chat's sign with the portrait of whichever robot has
- * used the most tokens today, then its count and the day's total.
+ * Employee of the Day: the plate under the chat's sign, with the portrait of whichever robot has
+ * used the most tokens today, what it is, and how many it has used.
  */
-function employeeFrame(tally: TokenTally | undefined, now: number, detail: Detail): string {
+function employeePlate(tally: TokenTally | undefined, now: number, detail: Detail): string {
   const { w, h } = FRAME
   const g = new Px(w + 1, h + 1)
-  R(g, WALL_SHADOW, 1, 1, w, h)
-  R(g, C.ink, 0, 0, w, h)
-  R(g, GOLD, 1, 1, w - 2, h - 2)
-  R(g, GOLD_L, 1, 1, w - 2, 1)
-  R(g, GOLD_L, 1, 1, 1, h - 2)
-  R(g, GOLD_D, 1, h - 2, w - 2, 1)
-  R(g, GOLD_D, w - 2, 1, 1, h - 2)
-  for (const [cx, cy] of [[1, 1], [w - 3, 1], [1, h - 3], [w - 3, h - 3]] as const) R(g, GOLD_L, cx, cy, 2, 2)
-  R(g, VELVET, 3, 3, w - 6, h - 6)
-  R(g, '#12162a', 3, 3, w - 6, 1)
-  R(g, '#12162a', 3, 3, 1, h - 6)
-  // the portrait, in its own inner frame
-  R(g, GOLD_D, 5, 5, 14, 14)
-  R(g, '#2b3352', 6, 6, 12, 12)
+  const f = plate(g, 0, 0, w, h, 'EMPLOYEE OF THE DAY')
+  // the portrait, in a well of its own
+  const well = { x: f.x + 1, y: f.y + 1, s: f.h - 2 }
+  R(g, C.panel, well.x, well.y, well.s, well.s)
   const best = champion(tally, now)
-  const role = roleInfo(best?.role ?? 'main')
-  const face = new Px(12, 12)
-  if (best) bot(face, 6, 19, { role: role.id, small: true, view: 'front', pose: 'stand', eyes: 'happy' })
-  else tx(face, '?', 5, 4, GOLD)
-  // the title, then the employee's tokens and the whole day's; before anyone has earned it, the frame says so
-  tx(g, 'EMPLOYEE', 21, 4, GOLD_L)
-  tx(g, 'OF THE DAY', 21, 10, GOLD)
+  const face = new Px(well.s, well.s)
+  if (best) bot(face, well.s >> 1, 19, { role: roleInfo(best.role).id, small: true, view: 'front', pose: 'stand', eyes: 'happy' })
+  else tx(face, '?', (well.s >> 1) - 1, (well.s >> 1) - 2, C.steelD)
+  // who it is, then its tokens; before anyone has earned it, the plate says so
+  const x0 = well.x + well.s + 3
   if (best) {
-    const end = tx(g, formatTokens(best.tokens), 21, 16, C.white)
-    tx(g, `OF ${formatTokens(tally?.total ?? 0)}`, end + 3, 16, GOLD)
-  } else tx(g, 'NO ONE YET', 21, 16, C.white)
-  // a star that glints on the corner of the frame
-  const star = sprite(7, 7, [0, 1.6], [1.6, 0.3], detail, (sg, t) => {
-    const bright = t > 0 ? C.white : GOLD_L
-    R(sg, C.ink, 2, 0, 3, 7)
-    R(sg, C.ink, 0, 2, 7, 3)
-    R(sg, bright, 3, 1, 1, 5)
-    R(sg, bright, 1, 3, 5, 1)
-    R(sg, GOLD, 2, 2, 3, 3)
-    R(sg, bright, 3, 3, 1, 1)
+    tx(g, fit(roleInfo(best.role).title, f.x + f.w - x0 - 10), x0, f.y + 1, C.cream)
+    const end = tx(g, formatTokens(best.tokens), x0, f.y + 8, C.amber)
+    tx(g, 'TOKENS', end + 2, f.y + 8, C.steelD)
+  } else {
+    tx(g, 'NO ONE YET', x0, f.y + 1, C.steel)
+    tx(g, '0 TOKENS', x0, f.y + 8, C.steelD)
+  }
+  // a medal at the end of the plate, with a glint that crosses it now and then
+  const medal = sprite(5, 9, [0, 1.6], [1.6, 0.3], detail, (sg, t) => {
+    R(sg, C.red, 1, 0, 1, 3)
+    R(sg, C.blue, 3, 0, 1, 3)
+    R(sg, C.amber, 1, 3, 3, 1)
+    R(sg, C.amber, 0, 4, 5, 3)
+    R(sg, C.amber, 1, 7, 3, 1)
+    R(sg, t > 0 ? C.white : BRASS, 1, 4, 2, 2)
   })
-  return at(FRAME.x, FRAME.y, g.svg() + at(6, 6, face.svg()) + at(w - 6, -2, star))
+  return `<g data-what="plate">${at(FRAME.x, FRAME.y, g.svg() + at(well.x, well.y, face.svg()) + (best ? at(f.x + f.w - 8, f.y + 2, medal) : ''))}</g>`
 }
 
 /* ---------- the cellar ---------- */
@@ -2191,36 +2210,42 @@ function steamSvg(small: boolean, detail: Detail): string {
 }
 
 /* ---------- the context gauge ---------- */
-/** How far round its dial the gauge's needle stands, 0 to 8: how full the context is, measured against the point where it is compacted. */
-export const gaugeStep = (context: number | undefined, limit: number | undefined) => (limit && context ? Math.max(0, Math.min(8, Math.round((context / limit) * 8))) : 0)
+/** How high the gauge stands, 0 to GAUGE_ROWS: how full the context is, measured against the point where it is compacted. */
+export const gaugeLevel = (context: number | undefined, limit: number | undefined) => (limit && context ? Math.max(0, Math.min(GAUGE_ROWS, Math.round((context / limit) * GAUGE_ROWS))) : 0)
 
-/** The main agent's pressure gauge: brass, with a red zone at the end of its scale and a lamp that blinks when the needle is in it. */
-function gaugeSvg(step: number, detail: Detail): string {
-  const dial = new Px(11, 12)
-  disc(dial, C.ink, 5, 6, 5)
-  disc(dial, '#c9922c', 5, 6, 4)
-  disc(dial, C.cream, 5, 6, 3)
-  R(dial, '#f3d57a', 3, 2, 3, 1)
-  // the red zone, at the end of the scale
-  R(dial, C.red, 8, 6, 1, 2)
-  R(dial, C.red, 7, 8, 1, 1)
-  // the needle sweeps from lower left, over the top, to lower right
-  const a = ((225 - step * 33.75) * Math.PI) / 180
-  thick(dial, step >= 7 ? C.redD : C.ink, 5, 6, Math.round(5 + Math.cos(a) * 3), Math.round(6 - Math.sin(a) * 3), 1)
-  R(dial, C.ink, 5, 6, 1, 1)
-  // a stub of pipe under it
-  R(dial, C.ink, 4, 11, 3, 1)
-  let out = once(dial.svg())
-  if (step >= 7) {
-    const lamp = new Px(11, 12)
-    R(lamp, C.ink, 4, 0, 3, 2)
-    R(lamp, '#ff6b6b', 5, 0, 1, 1)
-    const dark = new Px(11, 12)
-    R(dark, C.ink, 4, 0, 3, 2)
-    R(dark, C.redD, 5, 0, 1, 1)
-    out += detail > 0 ? lamp.svg() : cycle([lamp.svg(), dark.svg()], [0.35, 0.35])
+/** Where a row of the gauge stands on its scale, counted from the bottom: the top two are the red zone, the two under them a warning. */
+function gaugeZone(row: number) {
+  return row >= GAUGE_ROWS - 2 ? 2 : row >= GAUGE_ROWS - 4 ? 1 : 0
+}
+const GAUGE_LIT = [C.teal, C.amber, C.red]
+const GAUGE_SHINE = [C.tealL, C.lamp, '#ff9b8f']
+const GAUGE_DARK = ['#16303a', '#3b3120', '#4a1f2a']
+/** The gauge is in the red once its column stands in the red zone. */
+export const gaugeInRed = (level: number) => level > 0 && gaugeZone(level - 1) === 2
+
+/**
+ * The main agent's context gauge, in a bay of its monitor's case: a column that rises as the
+ * context fills toward the point where it is compacted. Each row is lit in the colour of its
+ * place on the scale, so the column is teal, then tipped with amber, then with red. The red zone
+ * at the top is marked even while it is dark, and once the column stands in it, it blinks.
+ */
+function gaugeSvg(level: number, detail: Detail): string {
+  const column = (blink: boolean) => {
+    const g = new Px(GAUGE.w, GAUGE_ROWS)
+    for (let k = 0; k < GAUGE_ROWS; k++) {
+      const z = gaugeZone(k)
+      const y = GAUGE_ROWS - 1 - k
+      if (k >= level || (blink && z === 2)) R(g, GAUGE_DARK[z]!, 0, y, GAUGE.w, 1)
+      else {
+        // glass: a line of light down its near side, and along the top of what is in it
+        R(g, k === level - 1 ? GAUGE_SHINE[z]! : GAUGE_LIT[z]!, 0, y, GAUGE.w, 1)
+        R(g, GAUGE_SHINE[z]!, 0, y, 1, 1)
+      }
+    }
+    return g.svg()
   }
-  return `<g data-what="gauge">${out}</g>`
+  const out = gaugeInRed(level) && detail === 0 ? cycle([column(false), column(true)], [0.45, 0.35]) : once(column(false))
+  return `<g data-what="gauge">${at(GAUGE.x, GAUGE.y, out)}</g>`
 }
 
 /* ---------- what an agent has changed ---------- */
@@ -2228,13 +2253,12 @@ function gaugeSvg(step: number, detail: Detail): string {
 function papersSvg(files: number): string {
   if (files <= 0) return ''
   const sheets = Math.min(12, files)
-  const h = sheets + 1
-  const g = new Px(7, h + 1)
-  R(g, C.ink, 0, 0, 7, h + 1)
-  for (let i = 0; i < sheets; i++) R(g, i % 2 ? '#d9cfb4' : C.paper, 1, 1 + i, 5, 1)
-  // the top sheet has writing on it
-  R(g, C.steelD, 2, 1, 3, 1)
-  return `<g data-what="papers" transform="translate(0 ${-(h + 1)})">${g.svg()}</g>`
+  const g = new Px(7, sheets + 2)
+  R(g, C.ink, 0, 0, 7, sheets + 2)
+  R(g, C.paper, 1, 1, 5, sheets)
+  // the edges of the sheets show as a faint line here and there down the stack
+  for (let i = 2; i < sheets; i += 3) R(g, '#dccfae', 1, 1 + i, 5, 1)
+  return `<g data-what="papers" transform="translate(0 ${-(sheets + 2)})">${g.svg()}</g>`
 }
 
 const CLOUD_W = 32
@@ -2681,7 +2705,7 @@ function deskSvg(r: Robot, role: string, p: Phase, detail: Detail): string {
         R(g, C.paper, 3, 4, 1, 1)
       })
     : sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
-  return at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.monX, p.seat.monY, screenOn) + at(p.seat.x + 23, p.seat.floorY, papersSvg(r.papers ?? 0))
+  return at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.monX, p.seat.monY, screenOn) + at(p.seat.x + 24, p.seat.floorY, papersSvg(r.papers ?? 0))
 }
 
 const roleIdOf = (r: Robot) => r.role ?? roleOf(r.type, r.description)
@@ -2874,12 +2898,12 @@ function roomSvg(world: World, now: number, selected: string, detail: Detail): s
     tx(plate, `+${Math.min(9, waiting.length - i)}`, 2, 1, C.ink)
     ground += during(i === 0 ? null : sec(waiting[i - 1]!), sec(t), at(PRINTER.x + 18, PLATE_Y + 4, plate.svg()))
   })
-  ground += at(BOARD.x, BOARD.y, tokenChart(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
-  ground += employeeFrame(world.tokens, now, detail)
+  ground += at(BOARD.x, BOARD.y, tokensPlate(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
+  ground += employeePlate(world.tokens, now, detail)
   const mainKind = main?.activity.kind ?? 'idle'
-  ground += screenSvg(133, 88, 23, 15, screenFor(mainKind), detail)
-  // on its monitor stands its gauge: how near its context is to being compacted
-  if (main) ground += at(146, 74, gaugeSvg(gaugeStep(main.context, world.limit), detail)) + at(160, FY, papersSvg(main.papers ?? 0))
+  ground += screenSvg(MAIN_SCREEN.x, MAIN_SCREEN.y, MAIN_SCREEN.w, MAIN_SCREEN.h, screenFor(mainKind), detail)
+  // in the head of its monitor is its gauge: how near its context is to being compacted
+  if (main) ground += gaugeSvg(gaugeLevel(main.context, world.limit), detail) + at(MAIN_DESK.x1 + 2, FY, papersSvg(main.papers ?? 0))
   const asking = world.robots.some((r) => r.activity.kind === 'ask' && r.status === 'working')
   if (asking) {
     const on = new Px(W, SIGN_Y + SIGN_H + 2)
@@ -3232,58 +3256,34 @@ export function avatarSvg(roleId: string, kind: ActivityKind, state: TaskState =
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="40" height="40">${defs}${tile}${robot}${rim}${badge}</svg>`
 }
 
-/** How many days the whiteboard charts: the last week, today included. */
+/** How many days the tokens plate charts: the last week, today included. */
 export const CHART_DAYS = 7
-const CHART_TOP = 4
-const CHART_BASE = 16
-const chartX = (i: number) => 5 + i * 6
+export const BAR_MAX = 10
 
-/** The row each day's point sits on: the busiest day at the top, a day without tokens on the baseline. */
-export function chartRows(daily: number[]): number[] {
+/** How tall each day's bar stands: the busiest day at full height, a day with any tokens at all at least a row, a day without none. */
+export function chartBars(daily: number[]): number[] {
   const max = Math.max(1, ...daily)
-  return daily.map((v) => CHART_BASE - Math.round((v / max) * (CHART_BASE - CHART_TOP)))
+  return daily.map((v) => (v > 0 ? Math.max(1, Math.round((v / max) * BAR_MAX)) : 0))
 }
 
-/** A line on the whiteboard, one pixel wide, as a marker draws it. */
-function stroke(g: Px, c: string, x0: number, y0: number, x1: number, y1: number) {
-  const dx = Math.abs(x1 - x0)
-  const dy = -Math.abs(y1 - y0)
-  const sx = x0 < x1 ? 1 : -1
-  const sy = y0 < y1 ? 1 : -1
-  let err = dx + dy
-  for (;;) {
-    R(g, c, x0, y0, 1, 1)
-    if (x0 === x1 && y0 === y1) return
-    const e2 = 2 * err
-    if (e2 >= dy) {
-      err += dy
-      x0 += sx
-    }
-    if (e2 <= dx) {
-      err += dx
-      y0 += sy
-    }
-  }
-}
-
-/** Tokens per day over the last week, drawn on the whiteboard with the markers from its tray. */
-function tokenChart(daily: number[]): string {
-  const g = new Px(BOARD.w, BOARD.h)
-  R(g, C.blueD, 3, CHART_BASE + 1, BOARD.w - 6, 1)
-  const rows = chartRows(daily)
-  for (let i = 1; i < rows.length; i++) stroke(g, C.red, chartX(i - 1), rows[i - 1]!, chartX(i), rows[i]!)
-  rows.forEach((y, i) => {
-    const x = chartX(i)
-    if (i === rows.length - 1) {
-      // today, still counting
-      R(g, C.redD, x - 1, y - 1, 3, 3)
-      R(g, C.white, x, y, 1, 1)
-    } else {
-      R(g, C.redD, x - 1, y, 3, 1)
-      R(g, C.redD, x, y - 1, 1, 3)
-    }
+/** Tokens per day over the last week: a bar for each day, oldest first, and today's, still growing, in amber. */
+function tokensPlate(daily: number[]): string {
+  const g = new Px(BOARD.w + 1, BOARD.h + 1)
+  const f = plate(g, 0, 0, BOARD.w, BOARD.h, 'TOKENS/DAY')
+  const base = f.y + f.h - 2
+  const pitch = 6
+  const x0 = f.x + ((f.w - (daily.length * pitch - 2)) >> 1)
+  R(g, C.panel2, f.x + 1, base, f.w - 2, 1)
+  chartBars(daily).forEach((n, i) => {
+    const today = i === daily.length - 1
+    const x = x0 + i * pitch
+    // a day with nothing in it keeps its place on the line
+    R(g, today ? C.amber : C.tealD, x, base, 4, 1)
+    if (!n) return
+    R(g, today ? C.amber : C.teal, x, base - n, 4, n)
+    R(g, today ? C.lamp : C.tealL, x, base - n, 4, 1)
   })
-  return g.svg()
+  return `<g data-what="plate">${g.svg()}</g>`
 }
 
 /** Real progress: the steps of an agent's own plan, or the trail of steps it has taken. */

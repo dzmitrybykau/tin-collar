@@ -3,9 +3,9 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'claude-code'
 
-import type { Act, Activity, ActivityKind, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
+import type { Act, Activity, ActivityKind, Change, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
-import { avatarSvg, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, girthOf, hasStoodUp, hitTest, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
+import { avatarSvg, buildJourney, buildRoom, CAPACITY, CHART_DAYS, chartRows, directJourneys, exitSlot, failClick, floorsFor, gaugeStep, girthOf, hasStoodUp, hitTest, isOverheated, layClick, layPicture, MAX_FLOORS, mendWait, noLayers, openCard, phaseOf, printSlot, progressSvg, roleInfo, roleOf, sceneHeight, SHED_MAX_MS, shedSpan, sizerSvg, skyKey, stageOf, W } from './scene'
 import type { ClickLayer, Layers, Progress, TaskState } from './scene'
 
 const PANE = 'office'
@@ -21,12 +21,16 @@ const ACT_SLOTS = 14
 const HISTORY_EVERY_MS = 60_000
 const HISTORY_DAYS = 14
 const LIST_KEEP_MS = 120_000
+// how many changed files are remembered, and how many of them the pane lists
+const CHANGES_KEPT = 40
+const CHANGES_SHOWN = 8
 
 // Change a shape tag when its type changes: it declines what an older version stored.
 const world = atom({ plugin: 'tin-collar', key: 'world' } as const, { home: '', floors: 0, robots: [], steps: {} }, { shape: 'world-4' })
 const display = atom({ plugin: 'tin-collar', key: 'display' } as const, { at: 0, home: '', floors: 0, robots: [], selected: '' }, { shape: 'display-3' })
 const stage = atom({ plugin: 'tin-collar', key: 'stage' } as const, { acts: [] }, { shape: 'stage-1' })
 const selected = atom({ plugin: 'tin-collar', key: 'selected' } as const, '')
+const changeOpen = atom({ plugin: 'tin-collar', key: 'change' } as const, '')
 const redraw = atom({ plugin: 'tin-collar', key: 'redraw' } as const, 0)
 
 /* The last card press, so a press that reaches the module twice opens it once. */
@@ -47,18 +51,18 @@ function diffOf(before: string, after: string): string {
   return [`@@ -1,${a.length} +1,${b.length} @@`, ...a.map((l) => `-${l}`), ...b.map((l) => `+${l}`)].join('\n')
 }
 
-type Described = { kind: ActivityKind; label: string; diff?: string }
+type Described = { kind: ActivityKind; label: string; diff?: string; path?: string }
 function describe(tool: string, a: Args): Described {
-  const d = (kind: ActivityKind, label: string, diff?: string): Described => ({ kind, label: clip(label, 40), diff })
+  const d = (kind: ActivityKind, label: string, diff?: string, path?: string): Described => ({ kind, label: clip(label, 40), diff, path: path || undefined })
   switch (tool) {
     case 'Read':
       return d('read', base(str(a.file_path)))
     case 'Edit':
-      return d('write', base(str(a.file_path)), diffOf(str(a.old_string), str(a.new_string)))
+      return d('write', base(str(a.file_path)), diffOf(str(a.old_string), str(a.new_string)), str(a.file_path))
     case 'Write':
-      return d('write', base(str(a.file_path)), diffOf('', str(a.content)))
+      return d('write', base(str(a.file_path)), diffOf('', str(a.content)), str(a.file_path))
     case 'NotebookEdit':
-      return d('write', base(str(a.notebook_path)))
+      return d('write', base(str(a.notebook_path)), undefined, str(a.notebook_path))
     case 'Grep':
     case 'Glob':
       return d('search', str(a.pattern))
@@ -245,7 +249,7 @@ function startStep(w: World, id: string, stepId: string, tool: string, d: Descri
     plan: applyPlan(r.plan, tool, args),
     activity: d.kind === 'think' ? r.activity : { kind: d.kind, label: d.label, since: now },
   }))
-  return addStep(v, id, { id: stepId, tool, kind: d.kind, label: d.label, startedAt: now, diff: d.diff })
+  return addStep(v, id, { id: stepId, tool, kind: d.kind, label: d.label, startedAt: now, diff: d.diff, path: d.path })
 }
 
 function endStep(w: World, id: string, stepId: string, ran: ToolCallResult, now: number): World {
@@ -253,11 +257,34 @@ function endStep(w: World, id: string, stepId: string, ran: ToolCallResult, now:
   const isError = !!r.deny || !!r.isError
   const list = (w.steps[id] ?? []).map((s) => (s.id === stepId ? { ...s, endedAt: now, isError } : s))
   const stillOpen = list.some((s) => s.endedAt === undefined)
-  return patch({ ...w, steps: { ...w.steps, [id]: list } }, id, now, (rb) => ({
+  const v = patch({ ...w, steps: { ...w.steps, [id]: list } }, id, now, (rb) => ({
     ...rb,
     errors: rb.errors + (isError ? 1 : 0),
+    // one call that works and it is no longer stuck
+    streak: isError ? (rb.streak ?? 0) + 1 : 0,
     activity: stillOpen || rb.status !== 'working' ? rb.activity : { kind: 'think', label: '', since: now },
   }))
+  const step = list.find((s) => s.id === stepId)
+  return step?.path && !isError ? noteChange(v, id, step, now) : v
+}
+
+/** Writes down that a robot has changed a file: the file goes to the top of the list, and one more sheet lies beside the robot's desk. */
+function noteChange(w: World, id: string, step: Step, now: number): World {
+  const r = w.robots.find((x) => x.id === id)
+  const who = !r ? 'Helper' : r.type === 'main' ? 'Main agent' : roleInfo(r.role ?? roleOf(r.type, r.description)).title
+  const old = (w.changes ?? []).find((c) => c.path === step.path)
+  const change: Change = {
+    path: step.path!,
+    name: step.label,
+    by: old ? (old.by.includes(who) ? old.by : [...old.by, who]) : [who],
+    ids: old ? (old.ids.includes(id) ? old.ids : [...old.ids, id]) : [id],
+    edits: (old?.edits ?? 0) + 1,
+    diff: step.diff ?? old?.diff,
+    at: now,
+  }
+  const changes = [change, ...(w.changes ?? []).filter((c) => c.path !== step.path)].slice(0, CHANGES_KEPT)
+  const papers = changes.filter((c) => c.ids.includes(id)).length
+  return { ...w, changes, robots: w.robots.map((x) => (x.id === id ? { ...x, papers } : x)) }
 }
 
 const roleIdOf = (r: Robot) => r.role ?? roleOf(r.type, r.description)
@@ -288,7 +315,9 @@ const visualKey = (d: Display, now: number) =>
     // the window follows the hour of the picture's own moment
     skyKey(d.at),
     // where each robot is: the room is drawn afresh once a change it had coming has played
-    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now), stageOf(r, d.floors, now)]),
+    shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.activity.kind, r.activity.label, r.spawnedAt, r.endedAt ?? 0, girthOf(r.context), r.compactingAt ?? 0, r.compactedAt ?? 0, shedPhase(r, now), stageOf(r, d.floors, now), isOverheated(r), r.papers ?? 0]),
+    // the needle of the main agent's gauge
+    gaugeStep(d.robots.find((r) => r.type === 'main')?.context, d.limit),
   ])
 const structureKey = (d: Display, now: number) =>
   JSON.stringify([d.home, d.floors, d.selected, shown(d, now).map((r) => [r.id, roleIdOf(r), r.seat, r.status, r.spawnedAt, r.endedAt ?? 0, r.exitAt ?? 0])])
@@ -300,7 +329,7 @@ function nextDisplay(w: World, prev: Display, sel: string, now: number): Display
     const same = old && old.activity.kind === r.activity.kind && old.activity.label === r.activity.label
     return { ...r, activity: same ? old.activity : { ...r.activity, since: now } }
   })
-  return { at: now, home: w.home, floors: w.floors, robots, selected: sel, tokens: w.tokens, history: w.history }
+  return { at: now, home: w.home, floors: w.floors, robots, selected: sel, tokens: w.tokens, history: w.history, limit: w.limit }
 }
 
 /** What the Employee of the Day frame shows, as it is drawn: changes below this go unseen. */
@@ -319,6 +348,16 @@ function tallyTokens(w: World, id: string, used: number, now: number): World {
 /** Records how full a robot's context window is, from its latest model request. */
 function withContext(w: World, id: string, context: number): World {
   return { ...w, robots: w.robots.map((r) => (r.id === id ? { ...r, context } : r)) }
+}
+
+/** Reads the size at which the main agent's context is compacted (or its whole window, where that is off): the red line on its gauge. */
+async function readLimit($: EngineInterface) {
+  try {
+    const { context } = await $.session.usage({ breakdown: 'summary' })
+    const limit = context.breakdown?.autoCompactThreshold ?? context.breakdown?.rawMaxTokens ?? context.window
+    if (!(limit > 0)) return
+    if ((await read($, world)).limit !== limit) await update($, world, (w) => ({ ...w, limit }))
+  } catch {}
 }
 
 /** Keeps this chat's total for today in the plugin's store, where every chat's chart reads it. */
@@ -386,7 +425,7 @@ function pictureOf(d: Display, now: number): string {
   const key = `${d.at || now}|${d.selected}`
   if (lastPicture.key !== key) {
     const robots = d.robots.map((r) => ({ ...r, role: roleIdOf(r) }))
-    lastPicture = { key, svg: buildRoom({ home: d.home, floors: d.floors, robots, steps: {}, tokens: d.tokens, history: d.history }, d.at || now, d.selected) }
+    lastPicture = { key, svg: buildRoom({ home: d.home, floors: d.floors, robots, steps: {}, tokens: d.tokens, history: d.history, limit: d.limit }, d.at || now, d.selected) }
   }
   return lastPicture.svg
 }
@@ -476,9 +515,11 @@ function progressOf(r: Robot, steps: Step[]): { bar: Progress; label: string } {
       ? `Done · ${count}`
       : state === 'failed'
         ? `Stopped · ${count}`
-        : taken.length
-          ? `${count} · ${stateWord(r)}`
-          : stateWord(r)
+        : isOverheated(r)
+          ? `${r.streak} failures in a row · ${stateWord(r)}`
+          : taken.length
+            ? `${count} · ${stateWord(r)}`
+            : stateWord(r)
   return { bar: { mode: 'trail', kinds, state }, label }
 }
 
@@ -502,14 +543,14 @@ function statusText(r: Robot, now: number): string {
     case 'idle':
       return 'Idle'
     default:
-      return r.type === 'main' ? 'Working' : `Running · ${age}`
+      return isOverheated(r) ? 'Stuck' : r.type === 'main' ? 'Working' : `Running · ${age}`
   }
 }
 const STATE_COLOR: Record<TaskState, string> = { running: 'suggestion', waiting: 'warning', done: 'success', failed: 'error', idle: 'inactive' }
 const STEP_ICON = (s: Step): [string, string] =>
   s.isError ? ['✕', '#ff6b6b'] : s.endedAt === undefined ? ['●', '#6aa5ff'] : ['✓', '#4fd17f']
 
-const portraitKind = (r: Robot): ActivityKind => (r.status === 'done' ? 'done' : r.status === 'failed' ? 'error' : r.activity.kind)
+const portraitKind = (r: Robot): ActivityKind => (r.status === 'done' ? 'done' : r.status === 'failed' || isOverheated(r) ? 'error' : r.activity.kind)
 
 async function openTranscript($: EngineInterface, id: string) {
   const res = await $.ui.view(id === 'main' ? {} : { agentId: id })
@@ -560,6 +601,7 @@ export const register: Register = (on) => {
       })
       $.clock.every(HISTORY_EVERY_MS, () => void loadHistory($).catch(() => {}))
       void loadHistory($).catch(() => {})
+      void readLimit($)
     } catch {}
     return next(e)
   })
@@ -652,6 +694,8 @@ export const register: Register = (on) => {
                   exitAt: undefined,
                   plan: id === 'main' ? undefined : r.plan,
                   turnStartedAt: now,
+                  // a new turn starts cool
+                  streak: 0,
                   // a new turn means its compaction is over, reported or not
                   compactedAt: r.compactingAt !== undefined && r.compactedAt === undefined ? now : r.compactedAt,
                   activity: r.activity.kind === 'idle' || r.activity.kind === 'done' ? { kind: 'think', label: '', since: now } : r.activity,
@@ -701,6 +745,8 @@ export const register: Register = (on) => {
           isError: failed,
         })
       })
+      // a model can be changed between turns, and its window with it
+      if (id === 'main') void readLimit($)
     } catch {}
     return res
   })
@@ -782,6 +828,15 @@ export const register: Register = (on) => {
     if (element.startsWith('card-')) {
       try {
         await choose($, element.slice(5))
+      } catch {}
+      return {}
+    }
+    if (element === 'changes') {
+      try {
+        const d = e.data as { fy?: number }
+        const list = ((await read($, world)).changes ?? []).slice(0, CHANGES_SHOWN)
+        const picked = list[Math.min(list.length - 1, Math.max(0, Math.floor((d.fy ?? 0) * list.length)))]
+        if (picked) await update($, changeOpen, (cur) => (cur === picked.path ? '' : picked.path))
       } catch {}
       return {}
     }
@@ -940,12 +995,12 @@ export const register: Register = (on) => {
               </Text>
             </Box>
             <Box flexDirection="column" alignItems="flex-end" flexShrink={0}>
-              <Text color={STATE_COLOR[state]} size="caption" wrap="truncate-end">
+              <Text color={isOverheated(r) ? 'warning' : STATE_COLOR[state]} size="caption" wrap="truncate-end">
                 ● {statusText(r, now)}
               </Text>
               {r.context ? (
                 <Text dimColor size="caption" wrap="truncate-end">
-                  {fmtContext(r.context)} context
+                  {fmtContext(r.context)} context{r.type === 'main' && w.limit ? ` · ${Math.min(100, Math.round((r.context / w.limit) * 100))}%` : ''}
                 </Text>
               ) : null}
             </Box>
@@ -989,9 +1044,74 @@ export const register: Register = (on) => {
         </Box>,
       )
     }
+    // What has been changed in this chat: the files, who changed each, and the latest change to the one picked.
+    const allChanges = w.changes ?? []
+    const changes = allChanges.slice(0, CHANGES_SHOWN)
+    const openPath = await read($, changeOpen)
+    const opened = changes.find((c) => c.path === openPath)
+    let changesCard = null
+    if (changes.length) {
+      const rows = (
+        <Box flexDirection="column">
+          {changes.map((c) => (
+            <Text key={`change-row-${c.path}`} bold={c.path === openPath} wrap="truncate-end">
+              <Text color="#ffc35c">{c.path === openPath ? '▾' : '▸'}</Text> {c.name}
+              <Text dimColor>
+                {'  '}
+                {c.by.join(', ')}
+                {c.edits > 1 ? ` · ${c.edits} edits` : ''}
+              </Text>
+            </Text>
+          ))}
+        </Box>
+      )
+      const changesKey = Client ? layer('changes') : null
+      const pickable =
+        Client && changesKey ? (
+          <Box position="relative" flexDirection="column">
+            {rows}
+            <Box position="absolute" top={0} left={0} width="100%" height="100%">
+              <Client key={changesKey} module="./hit.tsx" width="100%" height="100%" props={HIT_PROPS} />
+            </Box>
+          </Box>
+        ) : (
+          <Box flexDirection="column" gap="xs">
+            {rows}
+            <Box flexDirection="row" gap="xs" flexWrap="wrap">
+              {changes.map((c, i) => (
+                <Button key={`change-${i}`} onPress={() => void update($, changeOpen, (cur) => (cur === c.path ? '' : c.path)).catch(() => {})}>
+                  {c.name}
+                </Button>
+              ))}
+            </Box>
+          </Box>
+        )
+      changesCard = (
+        <Box key="changes-card" flexDirection="column" gap="xs" paddingX="sm" paddingY="xs" borderStyle="round" borderColor={opened ? 'promptBorder' : 'subtle'} backgroundColor="#ffffff08">
+          <Text bold wrap="truncate-end">
+            Changes
+            <Text dimColor>
+              {' · '}
+              {allChanges.length} {allChanges.length === 1 ? 'file' : 'files'}
+              {allChanges.length > changes.length ? `, the latest ${changes.length} shown` : ''}
+            </Text>
+          </Text>
+          {pickable}
+          {opened ? (
+            <Box flexDirection="column">
+              <Text dimColor size="caption" wrap="truncate-end">
+                Latest change · {opened.path}
+              </Text>
+              {opened.diff ? <Code source={opened.diff} format="diff" /> : <Text dimColor>No preview of this change.</Text>}
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     const list = (
       <Box flexDirection="column" gap="xs">
         {cards}
+        {changesCard}
       </Box>
     )
 

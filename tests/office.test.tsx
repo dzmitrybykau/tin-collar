@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { ARRIVAL_KEPT_MS, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartRows, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, girthOf, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
+import { ARRIVAL_KEPT_MS, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartRows, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, gaugeStep, girthOf, isOverheated, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -193,7 +193,7 @@ test('a finished robot hands in its report, then drops into the vat', async () =
   expect(positionOf(robot, 0, p.goneAt! + 10)).toBeNull()
 })
 
-test('the cellar is dark and has no walls: daylight falls in only while the hatch stands open', async () => {
+test('the cellar is dark: what is down there shows only in the light of the open hatch, or by the metal itself', async () => {
   const main: Robot = {
     id: 'main', type: 'main', description: 'Main', status: 'working', spawnedAt: -99_999, seat: -1,
     activity: { kind: 'think', label: '', since: 0 }, calls: 0, errors: 0,
@@ -205,14 +205,27 @@ test('the cellar is dark and has no walls: daylight falls in only while the hatc
   const p = phaseOf(leaver, 1)!
   const scene = (robots: Robot[], now: number) => buildScene({ home: 'Office', floors: 1, robots, steps: {} }, now)
   const rays = 'data-what="rays"'
+  // the ladle, the pipe and the wall behind them: with the hatch shut they are nowhere in the picture
+  const metal = 'data-what="cellar"'
   expect(scene([main], 0)).not.toContain(rays)
-  expect(scene([main, leaver], p.jumpAt! - 500)).toContain(rays)
-  expect(scene([main, leaver], p.goneAt! + 500)).not.toContain(rays)
+  expect(scene([main], 0)).not.toContain(metal)
+  expect(buildRoom({ home: 'Office', floors: 1, robots: [main, leaver], steps: {} }, p.jumpAt! - 100)).not.toContain(metal)
+  // the hatch opens for the robot that is leaving, and the light shows the ladle and its metal
+  expect(scene([main, leaver], p.jumpAt! - 100)).toContain(rays)
+  expect(scene([main, leaver], p.jumpAt! - 100)).toContain(metal)
+  // some seconds after the splash it is dark again
+  expect(scene([main, leaver], p.splashAt! + LEAK_MS + 500)).not.toContain(rays)
+  expect(scene([main, leaver], p.splashAt! + LEAK_MS + 500)).not.toContain(metal)
   // a splash leaves the joint between the pipe and the ladle weeping for a few seconds
   const leak = 'data-what="leak"'
   expect(scene([main], 0)).not.toContain(leak)
   expect(scene([main, leaver], p.splashAt! + 1000)).toContain(leak)
   expect(scene([main, leaver], p.splashAt! + LEAK_MS + 100)).not.toContain(leak)
+  // the metal for a new robot travels the pipe by its own glow, and is gone from the picture once it is in the printer
+  const born: Robot = { ...leaver, id: 'a2', status: 'working', endedAt: undefined, spawnedAt: 50_000, seat: 0 }
+  const feed = 'data-what="feed"'
+  expect(scene([main, born], 50_100)).toContain(feed)
+  expect(scene([main, born], phaseOf(born, 1)!.feedEnd + 100)).not.toContain(feed)
 })
 
 test('a new robot collects its blueprint from the main agent before it sits down', async () => {
@@ -488,6 +501,88 @@ test("a robot's journey is a picture of its own in the pane, and redrawing the p
   await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/auth.ts' })
   await ui.redraw()
   expect((await pictureIn('journey-0'))?.source).toBe(journey?.source)
+  await ui.unmount()
+})
+
+/* ---------- trouble, fullness and what was changed ---------- */
+test('a robot whose tool calls keep failing overheats, and cools with the first one that works', async ($, on) => {
+  expect(isOverheated(helper('a1', 0, 0, { streak: 2 }))).toBe(false)
+  expect(isOverheated(helper('a1', 0, 0, { streak: 3 }))).toBe(true)
+  // one that has finished is not stuck, whatever it left behind
+  expect(isOverheated(helper('a1', 0, 0, { streak: 5, status: 'done' }))).toBe(false)
+
+  mock.clock(on)
+  on('command.register', () => ({ value: { command: 'office' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.messages', () => ({ value: [] }))
+  let failing = true
+  on('tool.call', () => (failing ? { result: {}, text: 'exit code 1', isError: true } : { result: {}, text: 'ok' }))
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (let n = 0; n < 2; n++) await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /failures in a row/ })).toBeUndefined()
+  await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /3 failures in a row/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Stuck/ })).toBeDefined()
+  failing = false
+  await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /failures in a row/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Stuck/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test("the main agent's gauge shows how near its context is to being compacted", () => {
+  // nothing to show before anything is known
+  expect(gaugeStep(undefined, 160_000)).toBe(0)
+  expect(gaugeStep(80_000, undefined)).toBe(0)
+  // the needle goes round with the context, and stops at the end of the scale
+  expect(gaugeStep(20_000, 160_000)).toBe(1)
+  expect(gaugeStep(80_000, 160_000)).toBe(4)
+  expect(gaugeStep(150_000, 160_000)).toBe(8)
+  expect(gaugeStep(400_000, 160_000)).toBe(8)
+  const main = helper('main', -1, -99_999, { type: 'main', context: 150_000 })
+  const room = (limit: number | undefined) => buildRoom({ home: 'Office', floors: 0, robots: [main], steps: {}, limit }, 0)
+  expect(room(160_000)).toContain('data-what="gauge"')
+  // in the red its needle changes, and so the picture
+  expect(room(160_000)).not.toBe(room(1_000_000))
+})
+
+test('the files the agents change are listed with who changed them, and a click shows the latest change', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^Changes/ })).toBeUndefined()
+  await $.tool.call({ tool: 'Edit', file_path: 'C:/work/acme-api/src/auth.ts', old_string: 'let a', new_string: 'const a' })
+  await $.tool.call({ tool: 'Write', file_path: 'C:/work/acme-api/README.md', content: '# Acme' })
+  await $.tool.call({ tool: 'Edit', file_path: 'C:/work/acme-api/src/auth.ts', old_string: 'const a', new_string: 'const b', agentId: 'a1' })
+  // reading a file changes nothing
+  await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/src/routes.ts' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /^Changes · 2 files/ })).toBeDefined()
+  // the latest first, each with everyone who changed it
+  const rows = (await ui.findAll({ type: 'Text', text: /auth\.ts|README\.md/ })).map((r) => r.text).filter((t) => /^[▸▾]/.test(t))
+  expect(rows[0]).toMatch(/auth\.ts\s+Main agent, Explorer · 2 edits/)
+  expect(rows[1]).toMatch(/README\.md\s+Main agent/)
+  // a click on the first row opens its latest change; another closes it
+  expect(await ui.find({ type: 'Text', text: /Latest change/ })).toBeUndefined()
+  await ui.resize({ columns: 40, rows: 2, in: 'changes' })
+  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: 'changes' })
+  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'changes' })
+  expect(await ui.find({ type: 'Text', text: /Latest change · .*auth\.ts/ })).toBeDefined()
+  expect((await ui.find({ type: 'Code' }))?.props.source).toMatch(/\+const b/)
+  // a moment later: two presses in quick succession count as one
+  for (const until = Date.now() + 400; Date.now() < until; );
+  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: 'changes' })
+  expect(await ui.find({ type: 'Text', text: /Latest change/ })).toBeUndefined()
+  // each robot has a sheet beside its desk for every file it changed
+  const main = helper('main', -1, -99_999, { type: 'main', papers: 2 })
+  expect(buildRoom({ home: 'Office', floors: 0, robots: [main], steps: {} }, 0)).toContain('data-what="papers"')
+  expect(buildRoom({ home: 'Office', floors: 0, robots: [{ ...main, papers: 0 }], steps: {} }, 0)).not.toContain('data-what="papers"')
   await ui.unmount()
 })
 

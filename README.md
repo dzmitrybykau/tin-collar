@@ -20,9 +20,12 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 
 - **The main agent** runs the office from a leather chair at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for. With nothing to type, it taps its stick on the desk.
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
-- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch into a ladle of molten metal in the dark cellar. Daylight follows it down, the splash leaves the pipe's joint weeping for a moment, and the pipe takes the metal back to the printer, where it becomes the next robot.
+- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch in the floor. Under the floor it is dark, and nothing down there can be seen until the hatch swings open: then a shaft of light drops in and shows a ladle of molten metal, the stone wall behind it and the first of a pipe. The splash lights the cellar wide for an instant; the hatch shuts, and the glow of the metal is the last thing to go.
+- **The metal comes back.** When the next robot is ordered, a slug of metal leaves the ladle and travels the pipe in the dark, lighting it as it goes, up into the printer, whose vents glow while the robot is built.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
-- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same.
+- **A stuck robot overheats.** When three of an agent's tool calls fail in a row, its robot turns red, lets off steam at the ears and its screen fills with red; its card says how many have failed. The first call that works cools it down.
+- **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same, and on its monitor stands a pressure gauge: the needle shows how near its context is to the point where Claude compacts it, and a lamp blinks when it is in the red.
+- **Work piles up.** For every file an agent changes, a sheet lands on the stack of papers beside its desk.
 - **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. While its helpers work, an idle main agent takes a coffee break; in an empty office it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
 
 <p align="center">
@@ -61,7 +64,9 @@ Below the office is a task list with one card per agent: its portrait, what it i
 
 Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
 
-In a terminal there are no pictures; you get the task list and the traces.
+Under the tasks is a **Changes** card: the files changed in this chat, the latest first, each with who changed it. Click a file to see its latest change.
+
+In a terminal there are no pictures; you get the task list, the traces and the changes.
 
 ## Install
 

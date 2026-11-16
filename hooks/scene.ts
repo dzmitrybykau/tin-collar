@@ -1117,10 +1117,8 @@ const JOINT_X = 157 // where the pipe is bolted to the ladle
 // The cellar is dark from wall to wall. What shows in it is what the metal lights; daylight comes
 // in only through the hatch, while it stands open.
 const CELLAR = '#0b0812'
-const DIM = { out: '#05040a', body: '#23243a', lit: '#383b58' }
-const LADLE = { out: '#05040a', body: '#2d2e48', lit: '#4d5074', shade: '#1b1c2e' }
 const HATCH_LEAD_MS = 250
-const HATCH_HOLD_MS = 350
+const HATCH_HOLD_MS = 800
 /** How long the joint weeps after a splash. */
 export const LEAK_MS = 3600
 /* ---------- a compaction ---------- */
@@ -1551,31 +1549,6 @@ function paintGround(home: string): Px {
   return g
 }
 
-/**
- * The elbow where the pipe turns from the run up into the riser: a quarter ring with outlines on
- * both edges. Its highlight slides from the riser's lit left wall to the run's lit top wall, so
- * light and bore stay continuous through the turn.
- */
-function elbow(g: Px) {
-  const inner = BEND_R - PIPE_W
-  for (let y = BEND_CY; y < PIPE_Y + PIPE_W; y++) {
-    for (let x = PIPE_X; x < BEND_CX; x++) {
-      const dx = BEND_CX - (x + 0.5)
-      const dy = y + 0.5 - BEND_CY
-      const d = Math.hypot(dx, dy)
-      if (d < inner || d >= BEND_R) continue
-      const lit = (BEND_R - 1.5) + ((inner + 1.5) - (BEND_R - 1.5)) * (Math.atan2(dy, dx) / (Math.PI / 2))
-      const c = d >= BEND_R - 1 || d < inner + 1 ? DIM.out : Math.abs(d - lit) < 0.6 ? DIM.lit : DIM.body
-      R(g, c, x, y, 1, 1)
-    }
-  }
-  // collars where the bend meets the straight runs
-  R(g, DIM.out, PIPE_X - 1, BEND_CY - 2, PIPE_W + 2, 2)
-  R(g, DIM.lit, PIPE_X, BEND_CY - 2, PIPE_W, 1)
-  R(g, DIM.out, BEND_CX, PIPE_Y - 1, 2, PIPE_W + 2)
-  R(g, DIM.lit, BEND_CX, PIPE_Y, 1, PIPE_W)
-}
-
 const GOLD = '#d4a83a'
 const GOLD_L = '#f3d57a'
 const GOLD_D = '#8f6b1c'
@@ -1627,7 +1600,19 @@ function employeeFrame(tally: TokenTally | undefined, now: number, detail: Detai
   return at(FRAME.x, FRAME.y, g.svg() + at(6, 6, face.svg()) + at(w - 6, -2, star))
 }
 
-/** Under the ground floor: the chute, the vat of molten metal and the pipe back to the printer. */
+/* ---------- the cellar ---------- */
+/*
+ * Under the floor it is dark: with the hatch shut, nothing down there can be seen. What there is
+ * (a back wall of stone, the ladle of molten metal slung between its posts, and the pipe that
+ * takes the metal back to the printer) is drawn in three lights and shown only where that light
+ * falls: in the light that drops through the open hatch, in the spill beside it, and by the glow
+ * of the metal itself. Each light is flat: a thing is in it or it is not.
+ */
+type CellarLight = { wall: string; joint: string; floor: string; out: string; body: string; lit: string; shade: string; pipe: string; pipeLit: string }
+const IN_LIGHT: CellarLight = { wall: '#5b5876', joint: '#474461', floor: '#3f3c56', out: C.ink, body: '#7d83a8', lit: '#c5cae3', shade: '#4d5173', pipe: C.steelD, pipeLit: C.steelL }
+const IN_SPILL: CellarLight = { wall: '#2a2740', joint: '#201d34', floor: '#1b1929', out: '#05040a', body: '#3a3c5c', lit: '#5a5d84', shade: '#25263c', pipe: '#2b2c46', pipeLit: '#474a6c' }
+const IN_GLOW: CellarLight = { wall: '#3d2420', joint: '#2c1917', floor: '#26130f', out: '#0d0605', body: '#5e3526', lit: '#bd6a3c', shade: '#341a10', pipe: '#4f2c1f', pipeLit: '#b05f33' }
+
 /** A solid shape from a half-width per row, with a one-pixel outline round it. */
 function solid(g: Px, cx: number, y0: number, hws: number[], fill: string, out: string) {
   hws.forEach((hw, i) => {
@@ -1649,9 +1634,9 @@ function meltSurface(g: Px, cx: number, y: number, rx: number, k = 0) {
 }
 
 /** The ladle: a tapered, hooped bucket slung between two posts, brim-full of molten metal. */
-function ladle(g: Px) {
+function ladle(g: Px, l: CellarLight) {
   const cx = HOLE_X
-  const { out, body, lit, shade } = LADLE
+  const { out, body, lit, shade } = l
   const top = LADLE_TOP + 5
   // the cradle's posts, behind it
   for (const px of [cx - 27, cx + 25]) {
@@ -1689,37 +1674,238 @@ function ladle(g: Px) {
   }
 }
 
+/**
+ * The elbow where the pipe turns from the run up into the riser: a quarter ring with outlines on
+ * both edges. Its highlight slides from the riser's lit left wall to the run's lit top wall, so
+ * light and bore stay continuous through the turn.
+ */
+function elbow(g: Px, l: CellarLight) {
+  const inner = BEND_R - PIPE_W
+  for (let y = BEND_CY; y < PIPE_Y + PIPE_W; y++) {
+    for (let x = PIPE_X; x < BEND_CX; x++) {
+      const dx = BEND_CX - (x + 0.5)
+      const dy = y + 0.5 - BEND_CY
+      const d = Math.hypot(dx, dy)
+      if (d < inner || d >= BEND_R) continue
+      const lit = (BEND_R - 1.5) + ((inner + 1.5) - (BEND_R - 1.5)) * (Math.atan2(dy, dx) / (Math.PI / 2))
+      const c = d >= BEND_R - 1 || d < inner + 1 ? l.out : Math.abs(d - lit) < 0.6 ? l.pipeLit : l.pipe
+      R(g, c, x, y, 1, 1)
+    }
+  }
+  // collars where the bend meets the straight runs
+  R(g, l.out, PIPE_X - 1, BEND_CY - 2, PIPE_W + 2, 2)
+  R(g, l.pipeLit, PIPE_X, BEND_CY - 2, PIPE_W, 1)
+  R(g, l.out, BEND_CX, PIPE_Y - 1, 2, PIPE_W + 2)
+  R(g, l.pipeLit, BEND_CX, PIPE_Y, 1, PIPE_W)
+}
+
+/** Everything in the cellar as one of its lights shows it, in ground coordinates; shown through a clip, never whole. */
+function cellarSvg(light: 'light' | 'spill' | 'glow'): string {
+  return cached(`cellar:${light}`, () => {
+    const l = light === 'light' ? IN_LIGHT : light === 'spill' ? IN_SPILL : IN_GLOW
+    const g = new Px(W, GROUND_H)
+    const top = FY + 7
+    const floor = GROUND_H - 4
+    // the back wall, in courses of stone
+    R(g, l.wall, 0, top, W, floor - top)
+    for (let k = 0; top + k * 7 < floor; k++) {
+      const y0 = top + k * 7
+      const y1 = Math.min(y0 + 6, floor)
+      if (y1 < floor) R(g, l.joint, 0, y1, W, 1)
+      for (let x = k % 2 ? 13 : 4; x < W; x += 18) R(g, l.joint, x, y0, 1, y1 - y0)
+    }
+    R(g, l.floor, 0, floor, W, 2)
+    R(g, l.out, 0, floor + 2, W, 2)
+    // the pipe that carries the metal back to the printer: riser, elbow, run, with seams that glow
+    R(g, l.out, PIPE_X, top, PIPE_W, BEND_CY - top)
+    R(g, l.pipe, PIPE_X + 1, top, PIPE_W - 2, BEND_CY - top)
+    R(g, l.pipeLit, PIPE_X + 1, top, 1, BEND_CY - top)
+    R(g, l.out, BEND_CX, PIPE_Y, JOINT_X - BEND_CX, PIPE_W)
+    R(g, l.pipe, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, PIPE_W - 2)
+    R(g, l.pipeLit, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, 1)
+    elbow(g, l)
+    for (let x = 46; x < JOINT_X - 20; x += 28) {
+      R(g, l.out, x, PIPE_Y - 1, 3, PIPE_W + 2)
+      R(g, '#ff9a3c', x + 1, PIPE_Y + 1, 1, 4)
+    }
+    ladle(g, l)
+    // the joint that bolts the pipe to the ladle
+    R(g, l.out, JOINT_X, PIPE_Y - 3, 4, PIPE_W + 6)
+    R(g, l.pipe, JOINT_X + 1, PIPE_Y - 2, 3, PIPE_W + 4)
+    R(g, l.pipeLit, JOINT_X + 1, PIPE_Y - 2, 1, PIPE_W + 4)
+    return `<g data-what="cellar">${g.svg()}</g>`
+  })
+}
+
+/** Under the ground floor with the hatch shut: darkness, and the pipe where it comes up through the floor. */
 function basement(g: Px) {
   const top = FY + 7
   const bottom = GROUND_H
   R(g, CELLAR, 0, top, W, bottom - top)
-  R(g, C.ink, 0, bottom - 2, W, 2)
   // the hatch in the floor, closed
   R(g, C.ink, HOLE_X0 - 1, FY, HOLE_W + 2, 3)
   R(g, '#4a4f70', HOLE_X0, FY + 1, HOLE_W, 1)
   R(g, C.amber, HOLE_X0, FY, 2, 1)
   R(g, C.amber, HOLE_X0 + HOLE_W - 2, FY, 2, 1)
-  // the pipe that carries the metal back to the printer: riser, elbow, run. Through the floor it
-  // is lit by the room; down here it is a dim shape with glowing joints
+  // through the floor the pipe is lit by the room
   R(g, C.ink, PIPE_X, FY + 1, PIPE_W, top - FY - 1)
   R(g, C.steelD, PIPE_X + 1, FY + 1, PIPE_W - 2, top - FY - 1)
   R(g, C.steel, PIPE_X + 1, FY + 1, 1, top - FY - 1)
-  R(g, DIM.out, PIPE_X, top, PIPE_W, BEND_CY - top)
-  R(g, DIM.body, PIPE_X + 1, top, PIPE_W - 2, BEND_CY - top)
-  R(g, DIM.lit, PIPE_X + 1, top, 1, BEND_CY - top)
-  R(g, DIM.out, BEND_CX, PIPE_Y, JOINT_X - BEND_CX, PIPE_W)
-  R(g, DIM.body, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, PIPE_W - 2)
-  R(g, DIM.lit, BEND_CX, PIPE_Y + 1, JOINT_X - BEND_CX, 1)
-  elbow(g)
-  for (let x = 46; x < JOINT_X - 20; x += 28) {
-    R(g, DIM.out, x, PIPE_Y - 1, 3, PIPE_W + 2)
-    R(g, '#ff9a3c', x + 1, PIPE_Y + 1, 1, 4)
+}
+
+/** The metal is never still: light runs across it, and now and then a bubble comes up. */
+function meltLife(detail: Detail): string {
+  return sprite(47, 6, [0, 0.5, 1, 1.5], [0.5, 0.5, 0.5, 0.5], detail, (g, t) => {
+    const k = Math.round(t / 0.5)
+    meltSurface(g, 23, 4, 21, k)
+    if (k === 2) R(g, '#fff1a8', 31, 3, 2, 1)
+    if (k === 3) R(g, '#ffd166', 31, 1, 2, 2)
+  })
+}
+
+const points = (list: Array<[number, number]>) => list.map(([x, y]) => `${x},${y}`).join(' ')
+
+/**
+ * The hatch, from the moment it opens for a robot until the cellar is dark again, in ground
+ * coordinates. Its two leaves swing down in three steps and a shaft of light drops with them:
+ * a sliver, then half, then the whole of it. In the shaft the wall, the ladle and the metal stand
+ * in full light with dust turning in it; beside the shaft is the spill, where the rest of the
+ * ladle and the first of the pipe can be made out; beyond that nothing. The splash throws a glow
+ * of its own much wider for an instant, far enough to show the pipe leading away. Shut again, the
+ * metal's glow is the last thing to go.
+ */
+function hatchSvg(tag: string, open: number, shut: number, splash: number, sec: (t: number) => number, detail: Detail): string {
+  if (sec(shut + 700) <= 0) return ''
+  const cellarTop = FY + 7
+  const floor = GROUND_H - 2
+  const light = once(cellarSvg('light'))
+  const spill = once(cellarSvg('spill'))
+  const glow = once(cellarSvg('glow'))
+  const melt = detail >= 2 ? '' : at(HOLE_X - 23, MELT_Y - 4, meltLife(detail))
+  // dust turning in the shaft
+  const motes = sprite(W, GROUND_H, [0, 0.35, 0.7], [0.35, 0.35, 0.35], detail, (g, t) => {
+    const k = Math.round(t / 0.35)
+    for (const [mx, my] of [[176, 127], [183, 139], [172, 148], [186, 156], [179, 161], [181, 131]] as const) R(g, '#fff6df', mx + ((my + k) % 3) - 1, my + k, 1, 1)
+  })
+  // how far the leaves have swung: the gap between them, the shaft, and the spill beside it
+  const steps = [
+    { gap: 1, beam: [1, 1], spill: null },
+    { gap: 3, beam: [3, 7], spill: [5, 17, 24] },
+    { gap: 6, beam: [6, 14], spill: [9, 34, 46] },
+  ] as const
+  const stage = (k: 0 | 1 | 2): string => {
+    const s = steps[k]
+    const id = `${tag}${k}`
+    const beam = points([[HOLE_X - s.beam[0], cellarTop], [HOLE_X + s.beam[0], cellarTop], [HOLE_X + s.beam[1], floor], [HOLE_X - s.beam[1], floor]])
+    let out = `<clipPath id="beam-${id}"><polygon points="${beam}"/></clipPath>`
+    if (s.spill) {
+      const [st, sm, sb] = s.spill
+      const pool = points([[HOLE_X - st, cellarTop], [HOLE_X + st, cellarTop], [HOLE_X + sm, 138], [HOLE_X + sb, floor], [HOLE_X - sb, floor], [HOLE_X - sm, 138]])
+      out += `<clipPath id="spill-${id}"><polygon points="${pool}"/></clipPath><g clip-path="url(#spill-${id})">${spill}${melt}</g>`
+      // round its mouth the ladle is lit by its own metal
+      out += `<clipPath id="halo-${id}"><ellipse cx="${HOLE_X}" cy="${MELT_Y + 1}" rx="${k === 2 ? 29 : 20}" ry="${k === 2 ? 7 : 5}"/></clipPath><g clip-path="url(#halo-${id})">${glow}${melt}</g>`
+    }
+    out += `<g data-what="rays" clip-path="url(#beam-${id})">${light}${melt}${k === 2 ? motes : ''}</g>`
+    // the floor, cut through: the light in the gap, and the leaves
+    const g = new Px(W, GROUND_H)
+    if (k === 0) {
+      R(g, IN_LIGHT.wall, HOLE_X - 1, FY, 2, 7)
+    } else {
+      R(g, C.ink, HOLE_X0 - 1, FY, HOLE_W + 2, 7)
+      R(g, '#141021', HOLE_X0, FY, HOLE_W, 7)
+      R(g, IN_LIGHT.wall, HOLE_X - s.gap, FY, s.gap * 2, 7)
+      const leaf = '#4a4f70'
+      if (k === 1) {
+        thick(g, C.ink, HOLE_X0, FY + 1, HOLE_X0 + 3, FY + 6, 2)
+        thick(g, leaf, HOLE_X0, FY + 1, HOLE_X0 + 3, FY + 6, 1)
+        thick(g, C.ink, HOLE_X0 + HOLE_W - 1, FY + 1, HOLE_X0 + HOLE_W - 4, FY + 6, 2)
+        thick(g, leaf, HOLE_X0 + HOLE_W - 1, FY + 1, HOLE_X0 + HOLE_W - 4, FY + 6, 1)
+      } else {
+        for (const lx of [HOLE_X0 - 1, HOLE_X0 + HOLE_W - 1]) {
+          R(g, C.ink, lx - 1, FY + 6, 3, 9)
+          R(g, leaf, lx, FY + 7, 1, 7)
+          R(g, C.amber, lx, FY + 12, 1, 2)
+        }
+      }
+    }
+    return out + g.svg()
   }
-  ladle(g)
-  // the joint that bolts the pipe to the ladle
-  R(g, DIM.out, JOINT_X, PIPE_Y - 3, 4, PIPE_W + 6)
-  R(g, DIM.body, JOINT_X + 1, PIPE_Y - 2, 3, PIPE_W + 4)
-  R(g, DIM.lit, JOINT_X + 1, PIPE_Y - 2, 1, PIPE_W + 4)
+  const SWING = 80
+  let out = ''
+  // the splash: for an instant the metal lights the cellar far and wide
+  const flash = (name: string, rx: number, ry: number, from: number, until: number) => {
+    const id = `flash-${tag}${name}`
+    out += during(sec(from), sec(until), `<clipPath id="${id}"><ellipse cx="${HOLE_X}" cy="146" rx="${rx}" ry="${ry}"/></clipPath><g clip-path="url(#${id})">${glow}</g>`)
+  }
+  flash('a', 90, 62, splash, splash + 110)
+  flash('b', 60, 44, splash + 110, splash + 240)
+  out += during(sec(open), sec(open + SWING), stage(0))
+  out += during(sec(open + SWING), sec(open + 2 * SWING), stage(1))
+  out += during(sec(open + 2 * SWING), sec(shut - 2 * SWING), stage(2))
+  out += during(sec(shut - 2 * SWING), sec(shut - SWING), stage(1))
+  out += during(sec(shut - SWING), sec(shut), stage(0))
+  // shut: a puff of dust at the floor, and the metal's glow, which goes last
+  const dust = sprite(W, GROUND_H, [0, 0.15], [0.15, 0.15], detail, (g, t) => {
+    const k = t > 0 ? 1 : 0
+    for (const [dx, dir] of [[HOLE_X0 - 3, -1], [HOLE_X0 + HOLE_W + 1, 1]] as const) {
+      R(g, C.steelL, dx + dir * k * 2, FY - 2 - k, 2, 1)
+      R(g, C.steel, dx + dir * (2 + k * 2), FY - 1 - k * 2, 1, 1)
+    }
+  })
+  out += during(sec(shut), sec(shut + 300), dust)
+  const after = `after-${tag}`
+  out += during(sec(shut), sec(shut + 320), `<clipPath id="${after}"><ellipse cx="${HOLE_X}" cy="${MELT_Y + 2}" rx="30" ry="9"/></clipPath><g clip-path="url(#${after})">${glow}${melt}</g>`)
+  const ember = new Px(W, GROUND_H)
+  R(ember, '#7a2f12', HOLE_X - 19, MELT_Y, 39, 1)
+  R(ember, '#c2571d', HOLE_X - 14, MELT_Y, 29, 1)
+  out += during(sec(shut + 320), sec(shut + 700), ember.svg())
+  return out
+}
+
+/** The pipe's centre line, from inside the ladle through the joint, round the elbow and up into the printer. */
+function feedPath(): Pt[] {
+  const mid = PIPE_Y + PIPE_W / 2
+  const midR = BEND_R - PIPE_W / 2
+  const pts: Pt[] = [[JOINT_X + 6, mid], [JOINT_X, mid]]
+  for (let i = 0; i <= 6; i++) {
+    const a = (Math.PI / 2) * (1 - i / 6)
+    pts.push([BEND_CX - Math.cos(a) * midR, BEND_CY + Math.sin(a) * midR])
+  }
+  pts.push([PIPE_X + PIPE_W / 2, FY + 2])
+  return pts
+}
+
+/**
+ * A slug of molten metal drawn out of the ladle and along the pipe to the printer, in ground
+ * coordinates. It travels in the dark, and it is its own light: the pipe and the wall show by its
+ * glow in a small round patch that moves along with it, and the pipe swells where it passes.
+ */
+function feedSvg(tag: string, spawnedAt: number, feedEnd: number, sec: (t: number) => number, detail: Detail): string {
+  if (detail >= 2 || feedEnd <= spawnedAt) return ''
+  const bubble = new Px(10, 10)
+  disc(bubble, C.ink, 5, 5, 4)
+  disc(bubble, C.steel, 5, 5, 3)
+  disc(bubble, '#ff8a2a', 5, 5, 2)
+  R(bubble, '#ffd166', 4, 4, 2, 2)
+  R(bubble, C.white, 4, 4, 1, 1)
+  R(bubble, C.steelL, 2, 3, 1, 2)
+  const pts = feedPath()
+  const lens = pts.map((p, i) => (i === 0 ? 0 : Math.hypot(p[0] - pts[i - 1]![0], p[1] - pts[i - 1]![1])))
+  const total = lens.reduce((a, b) => a + b, 0)
+  let run = 0
+  const keys = lens.map((l) => ((run += l) / total).toFixed(4)).join(';')
+  const begin = s2(sec(spawnedAt))
+  const dur = s2((feedEnd - spawnedAt) / 1000)
+  const along = (dx: number, dy: number, sign = 1) =>
+    `<animateTransform attributeName="transform" type="translate" values="${pts.map(([x, y]) => `${s2(sign * (x + dx))} ${s2(sign * (y + dy))}`).join(';')}" keyTimes="${keys}" calcMode="linear" begin="${begin}s" dur="${dur}s" fill="freeze"/>`
+  const [x0, y0] = pts[0]!
+  const id = `glow-${tag}`
+  // what its glow shows goes with it: a round window that travels, over a cellar that stays where it is
+  const patch =
+    `<clipPath id="${id}"><circle r="11"/></clipPath>` +
+    `<g clip-path="url(#${id})" transform="translate(${s2(x0)} ${s2(y0)})">${along(0, 0)}<g transform="translate(${s2(-x0)} ${s2(-y0)})">${along(0, 0, -1)}${once(cellarSvg('glow'))}</g></g>`
+  const moving = `<g transform="translate(${s2(x0 - 5)} ${s2(y0 - 5)})">${along(-5, -5)}${bubble.svg()}</g>`
+  return `<g data-what="feed">${during(sec(spawnedAt), sec(feedEnd), patch + moving)}</g>`
 }
 
 function paintUpper(floor: number): Px {
@@ -1942,11 +2128,105 @@ function lookFor(kind: ActivityKind, seated: boolean): BotLook {
   return { pose: seated ? 'type' : 'stand', eyes: 'open' }
 }
 
-function robotFrames(roleId: string, look: BotLook, small: boolean, detail: Detail, seated = false, girth = 0, tool = false): string {
+function robotFrames(roleId: string, look: BotLook, small: boolean, detail: Detail, seated = false, girth = 0, tool = false, hot = false): string {
   const fast = look.pose === 'type' || look.pose === 'raise' || look.pose === 'err'
   const times = fast ? [0, 0.11] : [0, 0.65]
   const durs = fast ? [0.12, 0.12] : [0.6, 0.6]
-  return sprite(26, 34, times, durs, detail, (g, t) => bot(g, 13, 32, { role: roleId, small, pose: look.pose, eyes: look.eyes, t, seated, girth, tool }))
+  const paint = hot ? hotPaint(roleInfo(roleId).paint) : undefined
+  return sprite(26, 34, times, durs, detail, (g, t) => bot(g, 13, 32, { role: roleId, small, pose: look.pose, eyes: look.eyes, t, seated, girth, tool, ...(paint ? { paint } : {}) }))
+}
+
+/* ---------- overheating ---------- */
+/** How many tool calls in a row have to fail before a robot overheats. */
+export const OVERHEAT_AT = 3
+/** A robot whose last few tool calls all failed is stuck: it runs hot until one works. */
+export const isOverheated = (r: Robot) => r.status === 'working' && (r.streak ?? 0) >= OVERHEAT_AT
+
+const mix = (a: string, b: string, t: number) => {
+  const n = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16)
+  return '#' + [0, 1, 2].map((i) => Math.round(n(a, i) * (1 - t) + n(b, i) * t).toString(16).padStart(2, '0')).join('')
+}
+/** A role's paint as it looks red-hot. */
+const hotPaint = (p: Paint): Paint => ({ l: mix(p.l, '#ffb09c', 0.85), m: mix(p.m, '#e8504f', 0.85), d: mix(p.d, '#9c2f38', 0.85) })
+
+/** Steam let off at both sides of a hot robot's head, on the robot's own canvas. */
+function steamSvg(small: boolean, detail: Detail): string {
+  // a canvas wider than the robot's own, its middle over the robot's; the jets leave at ear height
+  const cx = 20
+  const ear = small ? 23 : 21
+  const side = small ? 6 : 7
+  const puffs = sprite(40, 34, [0, 0.16, 0.32, 0.48], [0.16, 0.16, 0.16, 0.16], detail, (g, t) => {
+    const k = Math.round(t / 0.16)
+    // a block `dx` out from the middle on both sides, `dy` up from the ears
+    const both = (c: string, dx: number, dy: number, w: number, h: number) => {
+      R(g, c, cx - dx - w + 1, ear - dy, w, h)
+      R(g, c, cx + dx, ear - dy, w, h)
+    }
+    // each jet shoots out sideways, swells into a puff as it rises, and thins to a wisp
+    if (k === 0) both(C.white, side, 0, 2, 1)
+    if (k === 1) {
+      both(C.white, side, 0, 3, 1)
+      both(C.steelL, side + 3, 2, 3, 3)
+      both(C.white, side + 3, 2, 2, 2)
+    }
+    if (k === 2) {
+      both(C.white, side, 0, 1, 1)
+      both(C.steelL, side + 5, 6, 3, 3)
+      both(C.white, side + 6, 6, 2, 2)
+    }
+    if (k === 3) {
+      both(C.steelL, side + 7, 9, 2, 2)
+      both(C.steel, side + 6, 6, 1, 1)
+    }
+  })
+  return at(13 - cx, 0, puffs)
+}
+
+/* ---------- the context gauge ---------- */
+/** How far round its dial the gauge's needle stands, 0 to 8: how full the context is, measured against the point where it is compacted. */
+export const gaugeStep = (context: number | undefined, limit: number | undefined) => (limit && context ? Math.max(0, Math.min(8, Math.round((context / limit) * 8))) : 0)
+
+/** The main agent's pressure gauge: brass, with a red zone at the end of its scale and a lamp that blinks when the needle is in it. */
+function gaugeSvg(step: number, detail: Detail): string {
+  const dial = new Px(11, 12)
+  disc(dial, C.ink, 5, 6, 5)
+  disc(dial, '#c9922c', 5, 6, 4)
+  disc(dial, C.cream, 5, 6, 3)
+  R(dial, '#f3d57a', 3, 2, 3, 1)
+  // the red zone, at the end of the scale
+  R(dial, C.red, 8, 6, 1, 2)
+  R(dial, C.red, 7, 8, 1, 1)
+  // the needle sweeps from lower left, over the top, to lower right
+  const a = ((225 - step * 33.75) * Math.PI) / 180
+  thick(dial, step >= 7 ? C.redD : C.ink, 5, 6, Math.round(5 + Math.cos(a) * 3), Math.round(6 - Math.sin(a) * 3), 1)
+  R(dial, C.ink, 5, 6, 1, 1)
+  // a stub of pipe under it
+  R(dial, C.ink, 4, 11, 3, 1)
+  let out = once(dial.svg())
+  if (step >= 7) {
+    const lamp = new Px(11, 12)
+    R(lamp, C.ink, 4, 0, 3, 2)
+    R(lamp, '#ff6b6b', 5, 0, 1, 1)
+    const dark = new Px(11, 12)
+    R(dark, C.ink, 4, 0, 3, 2)
+    R(dark, C.redD, 5, 0, 1, 1)
+    out += detail > 0 ? lamp.svg() : cycle([lamp.svg(), dark.svg()], [0.35, 0.35])
+  }
+  return `<g data-what="gauge">${out}</g>`
+}
+
+/* ---------- what an agent has changed ---------- */
+/** The papers beside a desk: a sheet for each file its robot has changed, in a stack that stops growing at a dozen. */
+function papersSvg(files: number): string {
+  if (files <= 0) return ''
+  const sheets = Math.min(12, files)
+  const h = sheets + 1
+  const g = new Px(7, h + 1)
+  R(g, C.ink, 0, 0, 7, h + 1)
+  for (let i = 0; i < sheets; i++) R(g, i % 2 ? '#d9cfb4' : C.paper, 1, 1 + i, 5, 1)
+  // the top sheet has writing on it
+  R(g, C.steelD, 2, 1, 3, 1)
+  return `<g data-what="papers" transform="translate(0 ${-(h + 1)})">${g.svg()}</g>`
 }
 
 const CLOUD_W = 32
@@ -2223,96 +2503,6 @@ function walkLegs(pts: Pt[], cum: number[], startAt: number, now: number, frames
   return out
 }
 
-/** The pipe's centre line, from the vat round the elbow and up into the printer. */
-function feedPath(): Pt[] {
-  const mid = PIPE_Y + PIPE_W / 2
-  const midR = BEND_R - PIPE_W / 2
-  const pts: Pt[] = [[JOINT_X, mid]]
-  for (let i = 0; i <= 6; i++) {
-    const a = (Math.PI / 2) * (1 - i / 6)
-    pts.push([BEND_CX - Math.cos(a) * midR, BEND_CY + Math.sin(a) * midR])
-  }
-  pts.push([PIPE_X + PIPE_W / 2, FY + 2])
-  return pts
-}
-
-/** A slug of molten metal drawn up to the printer: the pipe swells around a glowing bubble. */
-function feedSvg(spawnedAt: number, feedEnd: number, sec: (t: number) => number, detail: Detail): string {
-  if (detail >= 2 || feedEnd <= spawnedAt) return ''
-  const bubble = new Px(10, 10)
-  disc(bubble, C.ink, 5, 5, 4)
-  disc(bubble, C.steel, 5, 5, 3)
-  disc(bubble, '#ff8a2a', 5, 5, 2)
-  R(bubble, '#ffd166', 4, 4, 2, 2)
-  R(bubble, C.white, 4, 4, 1, 1)
-  R(bubble, C.steelL, 2, 3, 1, 2)
-  const pts = feedPath()
-  const lens = pts.map((p, i) => (i === 0 ? 0 : Math.hypot(p[0] - pts[i - 1]![0], p[1] - pts[i - 1]![1])))
-  const total = lens.reduce((a, b) => a + b, 0)
-  let run = 0
-  const keys = lens.map((l) => ((run += l) / total).toFixed(4)).join(';')
-  const values = pts.map(([x, y]) => `${s2(x - 5)} ${s2(y - 5)}`).join(';')
-  const begin = s2(sec(spawnedAt))
-  const dur = s2((feedEnd - spawnedAt) / 1000)
-  const halo = `<circle cx="5" cy="5" r="9" fill="url(#feedglow)"/>`
-  const glowDef = `<defs><radialGradient id="feedglow"><stop offset="0" stop-color="#ff9a3c" stop-opacity="0.55"/><stop offset="1" stop-color="#ff9a3c" stop-opacity="0"/></radialGradient></defs>`
-  const [x0, y0] = pts[0]!
-  const moving = `<g transform="translate(${s2(x0 - 5)} ${s2(y0 - 5)})"><animateTransform attributeName="transform" type="translate" values="${values}" keyTimes="${keys}" calcMode="linear" begin="${begin}s" dur="${dur}s" fill="freeze"/>${halo}${bubble.svg()}</g>`
-  return glowDef + during(sec(spawnedAt), sec(feedEnd), moving)
-}
-
-/** The metal is never still: light runs across it, and now and then a bubble comes up. */
-function meltLife(detail: Detail): string {
-  return sprite(47, 6, [0, 0.5, 1, 1.5], [0.5, 0.5, 0.5, 0.5], detail, (g, t) => {
-    const k = Math.round(t / 0.5)
-    meltSurface(g, 23, 4, 21, k)
-    if (k === 2) R(g, '#fff1a8', 31, 3, 2, 1)
-    if (k === 3) R(g, '#ffd166', 31, 1, 2, 2)
-  })
-}
-
-/**
- * Daylight in the cellar. While the hatch stands open, three hard-edged rays fall through it onto
- * the ladle, with dust hanging in them; when it slams shut there is a puff of dust at the floor.
- */
-function hatchLight(drops: Array<{ open: number; shut: number }>, sec: (t: number) => number, detail: Detail): string {
-  // the spans the hatch stands open; drops that follow close on each other share one
-  const spans: Array<{ open: number; shut: number }> = []
-  for (const d of [...drops].sort((a, b) => a.open - b.open)) {
-    if (sec(d.shut) <= 0) continue
-    const last = spans[spans.length - 1]
-    if (last && d.open <= last.shut) last.shut = Math.max(last.shut, d.shut)
-    else spans.push({ ...d })
-  }
-  if (!spans.length) return ''
-  const top = FY + 7
-  const beams = (list: Array<[a0: number, ka: number, b0: number, kb: number]>) => {
-    const g = new Px(W, GROUND_H)
-    for (const [a0, ka, b0, kb] of list)
-      for (let y = top; y < GROUND_H - 2; y++) {
-        const a = Math.round(a0 + ka * (y - top))
-        const b = Math.round(b0 + kb * (y - top))
-        if (b > a) R(g, '#cfc4ff', a, y, b - a, 1)
-      }
-    return g.svg()
-  }
-  const motes = new Px(W, GROUND_H)
-  for (const [mx, my] of [[170, 131], [187, 138], [163, 147], [194, 153], [181, 127], [176, 158]] as const) R(motes, '#e6defa', mx, my, 1, 1)
-  const light =
-    `<g data-what="rays"><g opacity="0.1">${beams([[HOLE_X0, -0.7, HOLE_X0 + 3, -0.38], [HOLE_X0 + HOLE_W - 3, 0.38, HOLE_X0 + HOLE_W, 0.7]])}</g>` +
-    `<g opacity="0.2">${beams([[HOLE_X0 + 2, -0.17, HOLE_X0 + HOLE_W - 2, 0.17]])}</g>${motes.svg()}</g>`
-  const dust = sprite(W, GROUND_H, [0, 0.15], [0.15, 0.15], detail, (g, t) => {
-    const k = t > 0 ? 1 : 0
-    for (const [dx, dir] of [[HOLE_X0 - 3, -1], [HOLE_X0 + HOLE_W + 1, 1]] as const) {
-      R(g, C.steelL, dx + dir * k * 2, FY - 2 - k, 2, 1)
-      R(g, C.steel, dx + dir * (2 + k * 2), FY - 1 - k * 2, 1, 1)
-    }
-  })
-  let out = ''
-  for (const s of spans) out += during(sec(s.open), sec(s.shut), light) + during(sec(s.shut), sec(s.shut + 300), dust)
-  return out
-}
-
 /** A splash shakes the joint where the pipe meets the ladle: a seam glows, drops fall, a small pool gathers. */
 function leakSvg(detail: Detail): string {
   const y0 = PIPE_Y + PIPE_W + 2
@@ -2460,8 +2650,15 @@ function deskSvg(r: Robot, role: string, p: Phase, detail: Detail): string {
   if (detail >= 3) return ''
   const kit = new Px(KIT.w, KIT.h)
   deskProp(kit, role)
-  const screenOn = sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
-  return at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.monX, p.seat.monY, screenOn)
+  // a robot that is stuck has a screen full of red
+  const screenOn = isOverheated(r)
+    ? sprite(7, 5, [0, 0.4], [0.4, 0.4], detail, (g, a) => {
+        R(g, a > 0 ? C.redD : C.red, 0, 0, 7, 5)
+        R(g, C.paper, 3, 1, 1, 2)
+        R(g, C.paper, 3, 4, 1, 1)
+      })
+    : sprite(7, 5, [0, 0.6, 1.2], [0.6, 0.6, 0.6], detail, (g, a) => screen(g, 0, 0, 7, 5, 'code', a + r.seat))
+  return at(p.seat.x + 8, p.seat.floorY - 19 - KIT.h, once(kit.svg())) + at(p.seat.monX, p.seat.monY, screenOn) + at(p.seat.x + 23, p.seat.floorY, papersSvg(r.papers ?? 0))
 }
 
 const roleIdOf = (r: Robot) => r.role ?? roleOf(r.type, r.description)
@@ -2488,7 +2685,8 @@ function arrivalSvg(r: Robot, floors: number, now: number, plateFrom: number, de
   const role = roleIdOf(r)
   const girth = girthOf(r.context)
   let out = ''
-  if (p.feedEnd > now) out += at(0, gy, feedSvg(r.spawnedAt, p.feedEnd, sec, detail))
+  const tag = r.id.replace(/[^a-zA-Z0-9]/g, '')
+  if (p.feedEnd > now) out += at(0, gy, feedSvg(tag, r.spawnedAt, p.feedEnd, sec, detail))
   if (p.printEnd > now) {
     const cx = PRINTER.x + (PRINTER.w >> 1)
     const id = `clip-${r.id.replace(/[^a-zA-Z0-9]/g, '')}`
@@ -2509,6 +2707,10 @@ function arrivalSvg(r: Robot, floors: number, now: number, plateFrom: number, de
     const gantry = `<g clip-path="url(#${room})"><g transform="translate(0 ${-PRINT_RISE})">${z}${head}</g></g>`
     // the control box's screen fills as the robot prints
     const bar = `<rect x="${LCD.x}" y="${LCD.y + 1}" width="0" height="1" fill="${C.green}"><animate attributeName="width" from="0" to="${LCD.w}" begin="${b}s" dur="${d}s" fill="freeze"/></rect>`
+    // the furnace in the control box is lit while there is metal in it: its vents glow
+    const vents = new Px(W, GROUND_H)
+    for (let vx = PRINTER.x + 19; vx < PRINTER.x + PRINTER.w - 12; vx += 2) R(vents, '#ff9a3c', vx, PLATE_Y + 6, 1, 4)
+    out += at(0, gy, during(sec(p.feedEnd - 80), sec(p.printEnd), vents.svg()))
     // the printer builds one robot at a time: this one's turn starts when the one before is off the plate
     out += at(0, gy, during(plateFrom > now ? sec(plateFrom) : null, sec(p.printEnd), `${reveal}${chamber}<g clip-path="url(#${id})">${at(cx - 13, PLATE_Y - 32, g.svg())}</g>${gantry}${bar}`))
   }
@@ -2582,18 +2784,13 @@ function leavingSvg(r: Robot, floors: number, now: number, selected: string, det
   R(thanks, C.paper, 1, 1, 9, 7)
   check(thanks, 0, 0, C.greenD)
   // the tick for it comes up beside the main agent's cloud: this picture lies over the room, cloud and all
-  out += during(sec(p.handAt + 600), sec(p.handAt + 1500), at(MAIN_X + 30, gy + SEAT_Y - 36, thanks.svg()))
+  out += during(sec(p.handAt + 600), sec(p.handAt + 1500), at(MAIN_X + 36, gy + SEAT_Y - 47, thanks.svg()))
   // a few steps to the hatch, which opens and lets the light into the pit; a hop, and down into the vat
   const toHole: Pt[] = [[DELIVER_X, groundY], [HOLE_X, groundY]]
   out += walkLegs(toHole, timings(toHole), p.toHoleAt, now, walker('walk', 'happy'))
   const opened = p.jumpAt - HATCH_LEAD_MS
   const shut = p.splashAt + HATCH_HOLD_MS
-  const open = new Px(HOLE_W + 2, 8)
-  R(open, CELLAR, 1, 0, HOLE_W, 8)
-  R(open, '#4a4f70', 0, 0, 2, 7)
-  R(open, '#4a4f70', HOLE_W, 0, 2, 7)
-  out += during(sec(opened), sec(shut), at(HOLE_X0 - 1, groundY, open.svg()))
-  out += at(0, gy, hatchLight([{ open: opened, shut }], sec, detail))
+  out += at(0, gy, hatchSvg(r.id.replace(/[^a-zA-Z0-9]/g, ''), opened, shut, p.splashAt, sec, detail))
   const leaping = sprite(26, 34, [0], [1], detail, (g) => bot(g, 13, 32, { role, small: true, pose: 'cheer', eyes: 'happy', girth }))
   const a = `${HOLE_X - 13} ${groundY - 32}`
   const values = `${a};${HOLE_X - 13} ${groundY - 41};${HOLE_X - 13} ${gy + MELT_Y + 12 - 32}`
@@ -2659,9 +2856,10 @@ function roomSvg(world: World, now: number, selected: string, detail: Detail): s
   })
   ground += at(BOARD.x, BOARD.y, tokenChart(dailyTotals(world.tokens, world.history, now, CHART_DAYS)))
   ground += employeeFrame(world.tokens, now, detail)
-  ground += at(HOLE_X - 23, MELT_Y - 4, meltLife(detail))
   const mainKind = main?.activity.kind ?? 'idle'
   ground += screenSvg(133, 88, 23, 15, screenFor(mainKind), detail)
+  // on its monitor stands its gauge: how near its context is to being compacted
+  if (main) ground += at(146, 74, gaugeSvg(gaugeStep(main.context, world.limit), detail)) + at(160, FY, papersSvg(main.papers ?? 0))
   const asking = world.robots.some((r) => r.activity.kind === 'ask' && r.status === 'working')
   if (asking) {
     const on = new Px(W, SIGN_Y + SIGN_H + 2)
@@ -2704,7 +2902,8 @@ function roomSvg(world: World, now: number, selected: string, detail: Detail): s
     const workKind: ActivityKind = r.status === 'working' ? r.activity.kind : 'think'
     const mark = r.id === selected ? selectMark(p.seat.x, seated - 20) : ''
     const cloud = detail >= 2 ? '' : bubbleSvg(workKind, r.status === 'working' ? r.activity.label : '', true, p.seat.bubble.x, p.seat.bubble.y, p.seat.x, seated - 18, detail)
-    const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth)) + mark + cloud
+    const hot = isOverheated(r)
+    const sitter = at(p.seat.x - 13, seated - 32, robotFrames(role, lookFor(workKind, true), true, detail, true, girth, false, hot) + (hot ? steamSvg(true, detail) : '')) + mark + cloud
     // a compaction at its desk: it is up and hopping, shedding bolts, for as long as it runs, then sits down again
     const shed = shedSpan(r, now)
     const up = shed ? Math.max(shed.from, a0) : 0
@@ -2746,7 +2945,8 @@ function roomSvg(world: World, now: number, selected: string, detail: Detail): s
     const leaning = at(MAIN_X - 14, gy + FY - 13, stick.svg())
     if (!inHand) out += leaning
     else if (hopping) out += during(null, sec(shed.until), leaning)
-    const seatedMain = at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand))
+    const hot = isOverheated(main)
+    const seatedMain = at(MAIN_X - 13, gy + SEAT_Y - 32, robotFrames('main', look, false, detail, true, girthOf(main.context), inHand, hot) + (hot ? steamSvg(false, detail) : ''))
     // what goes with the main agent in its chair: its cloud, or its sleep
     let seatedWith = ''
     if (kind === 'idle' && helpers) {
@@ -2813,7 +3013,8 @@ export function buildJourney(j: Journey, now: number): string {
 export function journeyEnd(j: Journey): number {
   const p = phaseOf(j.robot, j.floors)
   if (!p) return 0
-  return j.kind === 'in' ? p.arriveAt + ARRIVAL_KEPT_MS : (p.goneAt ?? 0) + 300
+  // a leaving is over when the cellar is dark again
+  return j.kind === 'in' ? p.arriveAt + ARRIVAL_KEPT_MS : Math.max(p.goneAt ?? 0, (p.splashAt ?? 0) + HATCH_HOLD_MS + 700) + 100
 }
 
 /** The whole building at `now` in one picture, journeys and all: for stills and for surfaces that draw one layer. */

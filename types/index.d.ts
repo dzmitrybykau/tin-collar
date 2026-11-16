@@ -39,6 +39,10 @@ export type Robot = {
   turnStartedAt?: number
   /** Tokens in its context window as of its latest model request. */
   context?: number
+  /** How many of its tool calls have failed in a row: at three it overheats, until one works. */
+  streak?: number
+  /** How many files it has changed: the stack of papers beside its desk. */
+  papers?: number
   /** When a compaction of its context began: it is up and hopping, shedding bolts, until that ends. */
   compactingAt?: number
   /** When that compaction ended; absent while it runs. */
@@ -68,6 +72,21 @@ export type Step = {
   endedAt?: number
   isError?: boolean
   diff?: string
+  /** The file it changes, when it changes one. */
+  path?: string
+}
+
+/** A file the agents have changed in this chat: who changed it, how often, and its latest change. */
+export type Change = {
+  path: string
+  name: string
+  /** Who changed it, by role, in the order they first did. */
+  by: string[]
+  /** The same, as robots. */
+  ids: string[]
+  edits: number
+  diff?: string
+  at: number
 }
 
 /** Tokens used today, per robot, for the Employee of the Day frame. */
@@ -86,6 +105,10 @@ export type World = {
   tokens?: TokenTally
   /** Tokens per day from the other chats, read from the plugin's store, for the whiteboard's chart. */
   history?: Record<string, number>
+  /** The size the main agent's context is compacted at: the red line on its gauge. */
+  limit?: number
+  /** The files changed in this chat, the latest first. */
+  changes?: Change[]
 }
 
 /** What the room's picture shows: the world, held and batched so the picture changes rarely. */
@@ -97,6 +120,7 @@ export type Display = {
   selected: string
   tokens?: TokenTally
   history?: Record<string, number>
+  limit?: number
 }
 
 /** One journey a robot makes across the office, drawn once in a picture of its own and left alone until it is over. */
@@ -127,6 +151,8 @@ declare module 'claude-code' {
       display: Shaped<Display>
       stage: Shaped<Stage>
       selected: string
+      /** Which changed file is open in the pane's list of changes. */
+      change: string
       /** Counts up to have the pane drawn again when a picture layer is due to come off. */
       redraw: number
     }

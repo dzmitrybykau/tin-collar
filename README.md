@@ -22,11 +22,31 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
 - **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch in the floor, under an amber arrow lettered OFFBOARDING. Under the floor it is dark, and nothing down there can be seen until the hatch swings open: then a shaft of light drops in and shows a ladle of molten metal, the stone wall behind it and the first of a pipe. The splash lights the cellar wide for an instant and shakes a drop or two out of the pipe's joint; when the last drop has fallen the hatch shuts, and the glow of the metal is the last thing to go.
 - **The metal comes back.** When the next robot is ordered, a slug of metal leaves the ladle and travels the pipe in the dark, lighting it as it goes, up into the printer, whose vents glow while the robot is built.
-- **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
+
+<p align="center">
+  <img src="docs/recycling.gif" width="768" alt="A robot hands in its report, hops through a hatch under an arrow lettered OFFBOARDING into a ladle of molten metal in a dark cellar; later a glowing slug of metal travels a pipe to the 3D printer, which prints a new robot">
+</p>
+
+<p align="center"><sub>
+  The writer hands in its report and takes the hatch. Light drops into the cellar, the splash shakes a drop out of the pipe's joint, the hatch shuts.<br>
+  Then the metal travels the pipe in the dark and comes out of the printer as an architect.
+</sub></p>
+
 - **A stuck robot overheats.** When three of an agent's tool calls fail in a row, its robot turns red, lets off steam at the ears and its screen fills with red; its card says how many have failed. The first call that works cools it down.
 - **Robots carry their context.** A robot gets visibly rounder as its context window fills up, at 40k, 80k and 150k tokens. While Claude compacts it, the robot is up from its seat and hops, and with every hop bolts fly out of it into a small pile at its feet. When the compaction is over it sits down slimmer, and the pile is cleared away. The main agent does the same, and its monitor has a gauge built into the case beside the screen: a column that rises as its context nears the point where Claude compacts it, tipped with amber and then with red, and blinking once it stands in the red.
 - **Work piles up.** For every file an agent changes, a sheet lands on the stack of papers beside its desk.
 - **The room reacts.** A `NEEDS YOU` sign flashes when an agent is waiting for your answer. While its helpers work, an idle main agent takes a coffee break; in an empty office it dozes off and the lights go down. The window shows the sky for the hour on your computer's clock.
+
+<p align="center">
+  <img src="docs/overheating.gif" width="768" alt="A robot at its desk turns red and lets off steam; the gauge beside the main agent's screen blinks red, then the main agent hops, shedding bolts, and sits down slimmer with the gauge low">
+</p>
+
+<p align="center"><sub>
+  The coder's tests keep failing: it runs red and lets off steam until one passes. The main agent's gauge stands in the red;<br>
+  then its context is compacted: it hops, sheds bolts, sits down slimmer, and the gauge drops.
+</sub></p>
+
+- **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
 
 <p align="center">
   <img src="docs/office-night.png" width="768" alt="A three-storey pixel office at night with thirteen robots at their desks">
@@ -62,9 +82,20 @@ Both plates are made the way the sign is: the same wood and lettering across the
 
 ## Under the picture
 
-Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one. Each card has a square frame a pixel thick with its robot's colour down the near edge, a chip that says how the task stands, and a mark that shows whether it is open; its portrait and its progress bar are made the way the office's own instruments are. A click on a card opens its details: the plan, the latest steps, the latest change and what the agent last said.
+Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar has a cell for each step of the agent's own plan when it keeps one, and otherwise a cell for each thing it has done, in the colour of what that was. Each card has a square frame a pixel thick with its robot's colour down the near edge, a chip that says how the task stands, and a mark that shows whether it is open.
 
-Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
+The lamp in the corner of the portrait says the same as the chip:
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/cards/working.png" width="56" alt=""><br><b>Working</b><br><sub>the lamp blinks</sub></td>
+    <td align="center"><img src="docs/cards/needs-you.png" width="56" alt=""><br><b>Needs you</b><br><sub>waiting for your answer</sub></td>
+    <td align="center"><img src="docs/cards/done.png" width="56" alt=""><br><b>Done</b><br><sub>report handed in</sub></td>
+    <td align="center"><img src="docs/cards/stopped.png" width="56" alt=""><br><b>Stopped or stuck</b><br><sub>failed, or three failures in a row</sub></td>
+  </tr>
+</table>
+
+Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. Click it again to close it. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
 
 Under the tasks is a **Changes** card: the files changed in this chat, the latest first, each with who changed it. Click a file to see its latest change.
 
@@ -88,7 +119,7 @@ claude plugin install tin-collar --marketplace dzmitrybykau/tin-collar
 
 In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `dzmitrybykau/tin-collar`, then **Add plugin**. A mod installed from a terminal at the user scope also loads in the desktop app's local sessions.
 
-Built and tested on Claude Code 2.1.321.
+Built and tested on Claude Code 2.1.325.
 
 ## Use
 
@@ -137,11 +168,11 @@ claude plugin test tin-collar
 | `hooks/register.tsx` | The hooks: turns session events into the state of the office, draws the pane and the task cards |
 | `hooks/scene.ts` | The pixel renderer: the robots and what they wear, the building, and every robot's timeline |
 | `hooks/tally.ts` | Token counts per robot and per day |
-| `hooks/hit.tsx` | The click layer over the picture |
+| `hooks/hit.tsx` | The click layer over the picture and over each card |
 | `types/index.d.ts` | The type contract for the mod's state |
 | `tests/office.test.tsx` | Tests for the behaviour described above |
 
-The picture is drawn into a small pixel framebuffer, converted to SVG paths and animated with SMIL. It is laid in layers. The room is one layer: everything that stays in its place. Each journey a robot makes (being printed and walking to its desk, or carrying its report and dropping into the vat) is a layer of its own, laid once and left alone until the journey is over. So whatever the agents do meanwhile, a robot on its way is never moved, and however many helpers are ordered at once, each one's journey plays from start to end. That is why nothing jumps and nothing flickers.
+The picture is drawn into a small pixel framebuffer, converted to SVG paths and animated with SMIL. It is laid in layers. The room is one layer: everything that stays in its place. The light that falls into the cellar is another. Each journey a robot makes (being printed and walking to its desk, or carrying its report and dropping into the vat) is a layer of its own, laid once and left alone until the journey is over. So whatever the agents do meanwhile, a robot on its way is never moved, and however many helpers are ordered at once, each one's journey plays from start to end. That is why nothing jumps and nothing flickers.
 
 ## License
 

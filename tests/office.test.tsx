@@ -812,3 +812,55 @@ test('a card is a flat panel with square corners, and nothing in its portrait or
   }
   await ui.unmount()
 })
+
+test('an open card reads what its agent last said once, not each time the pane is drawn', async ($, on) => {
+  // the engine as in the other tests, but counting each read of a conversation
+  mock.clock(on)
+  on('command.register', () => ({ value: { command: 'office' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.call', () => ({ result: {}, text: 'export function login() {}' }))
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  let reads = 0
+  on('session.messages', (() => {
+    reads += 1
+    return { value: [{ role: 'assistant', text: 'All routes mapped.', toolUses: [] }] }
+  }) as never)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(reads).toBe(0)
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'card-a1' })
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'card-a1' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  expect(reads).toBe(1)
+  // the office goes on changing and the pane is drawn again and again: nothing more is read
+  for (let i = 0; i < 4; i++) {
+    await $.tool.call({ tool: 'Read', file_path: 'C:/work/acme-api/auth.ts' })
+    await ui.redraw()
+  }
+  expect(reads).toBe(1)
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a button held down elsewhere and let go over a card does not open it; a release after the pointer rested there does', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const isOpen = async () => (await ui.find({ key: 'open-a1' })) !== undefined
+  // text is being selected somewhere else, and the button is let go over the card
+  await ui.pointer({ type: 'enter', x: 2, y: 0, in: 'card-a1' })
+  await ui.pointer({ type: 'move', x: 3, y: 0, button: 'left', in: 'card-a1' })
+  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'card-a1' })
+  expect(await isOpen()).toBe(false)
+  await ui.pointer({ type: 'leave', x: 3, y: 0, in: 'card-a1' })
+  // the pointer comes to rest on the card, and the layer hears only the release of the click
+  await ui.pointer({ type: 'enter', x: 2, y: 0, in: 'card-a1' })
+  await ui.pointer({ type: 'move', x: 3, y: 0, in: 'card-a1' })
+  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'card-a1' })
+  expect(await isOpen()).toBe(true)
+  await ui.unmount()
+})

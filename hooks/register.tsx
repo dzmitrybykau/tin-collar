@@ -1,7 +1,7 @@
 // Tin Collar: a pixel office building beside the chat. Every agent is a robot dressed
 // for its role, every tool call moves it, and clicking a robot opens its trace.
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, EngineInterface, Register, ToolCallResult } from 'claude-code'
+import type { ElementTable, EngineInterface, Register, RenderChildren, ToolCallResult } from 'claude-code'
 
 import type { Act, Activity, ActivityKind, Change, Display, PlanItem, PlanStatus, Robot, Stage, Step, World } from '../types'
 import { addTokens, champion, dailyTotals, dayOf, dayOfKey, formatTokens, lastDays, tokensKey } from './tally'
@@ -24,9 +24,19 @@ const LIST_KEEP_MS = 120_000
 // how many changed files are remembered, and how many of them the pane lists
 const CHANGES_KEPT = 40
 const CHANGES_SHOWN = 8
-// a card's panel, and the same a shade lighter for the card that is open or under the pointer
-const CARD = '#ffffff0d'
-const CARD_OPEN = '#ffffff1a'
+// A card: its panel, the same a shade lighter for the card that is open or under the pointer, and
+// the hairline of its frame. The app rounds every border it draws for a mod, so the frame is put
+// together from boxes a pixel thick: a twentieth of a line high, a seventh of a character wide.
+const CARD = '#ffffff0a'
+const CARD_OPEN = '#ffffff14'
+const EDGE = '#ffffff33'
+const HAIR = 0.05
+const EDGE_W = 0.14
+const ACCENT_W = 0.45
+// the ground of a status chip: the state's own colour, thinned
+const CHIP: Record<TaskState, string> = { running: '#4f8fe638', waiting: '#ffc35c38', done: '#3fbf6a38', failed: '#e8504f38', idle: '#6f789338' }
+// how wide a card's progress is asked to be: more than any pane, so the app fits it to the card
+const BAR_PX = 1600
 
 // Change a shape tag when its type changes: it declines what an older version stored.
 const world = atom({ plugin: 'tin-collar', key: 'world' } as const, { home: '', floors: 0, robots: [], steps: {} }, { shape: 'world-4' })
@@ -585,13 +595,45 @@ async function lastWords($: EngineInterface, id: string): Promise<string> {
   return ''
 }
 
+/*
+ * What each agent last said, for its card's details. It is read when a card opens and when its
+ * agent has said more, and never while the pane is being drawn: the read is of the agent's whole
+ * conversation, and the pane is drawn again with every change in the office. A card that had to
+ * wait for it at each drawing answered a click late, or after the next click.
+ */
+const said = new Map<string, string>()
+const heardAt = new Map<string, number>()
+const hearing = new Set<string>()
+const HEAR_EVERY_MS = 8000
+async function hear($: EngineInterface, id: string) {
+  if (hearing.has(id)) return
+  hearing.add(id)
+  try {
+    const text = await lastWords($, id)
+    heardAt.set(id, Date.now())
+    if (said.get(id) !== text) {
+      said.set(id, text)
+      await update($, redraw, (n) => n + 1)
+    }
+  } catch {
+  } finally {
+    hearing.delete(id)
+  }
+}
+/** The agent whose card is open has done something more: what it last said is read again, but not at every step. */
+async function hearOpen($: EngineInterface, id: string, now: number, always = false) {
+  if (openCard(await read($, selected), pickedAt, viewed) !== id) return
+  if (always || now - (heardAt.get(id) ?? 0) >= HEAR_EVERY_MS) void hear($, id)
+}
+
 async function choose($: EngineInterface, id: string) {
   // what is open is what the pane shows, so a click on the open card closes it
   const open = openCard(await read($, selected), pickedAt, viewed)
   pickedAt = Date.now()
   await update($, selected, () => (open === id ? '' : id))
-  // a click is answered at once
+  // a click is answered at once; what the agent last said follows when it has been read
   await publish($, true)
+  if (open !== id) void hear($, id)
 }
 
 /* Every hook below only watches: if one fails, the work it watched goes on untouched. */
@@ -650,6 +692,7 @@ export const register: Register = (on) => {
     if (started) {
       try {
         await update($, world, (w) => endStep(w, id, stepId, ran, Date.now()))
+        void hearOpen($, id, Date.now()).catch(() => {})
       } catch {}
     }
     return ran
@@ -729,6 +772,7 @@ export const register: Register = (on) => {
     try {
       const id = e.agentId ?? 'main'
       const now = Date.now()
+      void hearOpen($, id, now, true).catch(() => {})
       await update($, world, (w) => {
         if (id === 'main') {
           const a: Activity =
@@ -924,12 +968,15 @@ export const register: Register = (on) => {
       .filter((r) => r.type === 'main' || r.endedAt === undefined || now - r.endedAt < LIST_KEEP_MS)
       .sort((a, b) => Number(a.type !== 'main') - Number(b.type !== 'main') || Number(a.endedAt !== undefined) - Number(b.endedAt !== undefined) || a.spawnedAt - b.spawnedAt)
 
+    // a card opened from the tasks list, or open when the mod was loaded again, has its agent's last words read too
+    if (sel && !said.has(sel)) void hear($, sel)
+
     // A task's details, opened under its row: plan, recent steps, latest change, last message.
-    const details = async (r: Robot) => {
+    const details = (r: Robot) => {
       const steps = w.steps[r.id] ?? []
       const recent = steps.slice(-8)
       const change = [...steps].reverse().find((s) => s.diff)
-      const said = await lastWords($, r.id)
+      const words = said.get(r.id) ?? ''
       const role = roleInfo(roleIdOf(r))
       const meta = [role.title, r.model ?? '', `started ${fmtTime(r.spawnedAt)}`, `${r.calls} ${r.calls === 1 ? 'step' : 'steps'}`].filter(Boolean).join(' · ')
       return (
@@ -969,12 +1016,12 @@ export const register: Register = (on) => {
               <Code source={change.diff} format="diff" />
             </Box>
           ) : null}
-          {said ? (
+          {words ? (
             <Box flexDirection="column">
               <Text dimColor size="caption">
                 Last message
               </Text>
-              <Markdown text={said} />
+              <Markdown text={words} />
             </Box>
           ) : null}
           {r.type === 'main' ? null : (
@@ -988,10 +1035,33 @@ export const register: Register = (on) => {
       )
     }
 
-    // Each task is a card: portrait, title and role, a status chip, then its progress. A card is a
-    // flat panel with square corners, as the app's own are: the app rounds every border it draws
-    // for a mod, so a card has none, and the one that is open is a shade lighter.
-    // A click anywhere on the card's face opens or closes its details.
+    // A card's frame. In the app it is square: hairlines over and under, the accent colour down the
+    // near edge, a hairline down the far one. A terminal draws its own square border instead.
+    const terminal = e.surface === 'terminal'
+    const framed = (key: string, accent: string, lit: boolean, canHover: boolean, body: RenderChildren) =>
+      terminal ? (
+        <Box key={key} flexDirection="column" paddingX="sm" borderStyle="single" borderColor={lit ? 'promptBorder' : 'subtle'}>
+          {body}
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="column" backgroundColor={lit ? CARD_OPEN : CARD} {...(canHover ? { hover: { backgroundColor: CARD_OPEN } } : {})}>
+          <Box height={HAIR} flexShrink={0} backgroundColor={EDGE} />
+          <Box flexDirection="row">
+            <Box width={ACCENT_W} flexShrink={0} backgroundColor={accent} />
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} paddingX="sm" paddingY="xs">
+              {body}
+            </Box>
+            <Box width={EDGE_W} flexShrink={0} backgroundColor={EDGE} />
+          </Box>
+          <Box height={HAIR} flexShrink={0} backgroundColor={EDGE} />
+        </Box>
+      )
+    // the line between a card's face and what is open under it
+    const rule = terminal ? null : <Box height={HAIR} flexShrink={0} backgroundColor={EDGE} />
+
+    // Each task is a card: portrait, title and role, a status chip, then its progress. The mark at
+    // the end of its first line says whether it is open. A click anywhere on the card's face opens
+    // or closes its details.
     const cards = []
     for (const r of robots) {
       const held = shownNow.robots.find((o) => o.id === r.id) ?? r
@@ -999,11 +1069,18 @@ export const register: Register = (on) => {
       const progress = progressOf(r, w.steps[r.id] ?? [])
       const open = r.id === sel
       const state = taskState(r)
+      const hot = isOverheated(r)
       const detailLine = [r.type === 'main' ? '' : role.title, r.model ?? '', progress.label].filter(Boolean).join(' · ')
+      const status = (
+        <Text color={hot ? 'warning' : STATE_COLOR[state]} size="caption" wrap="truncate-end">
+          {terminal ? '● ' : ''}
+          {statusText(r, now)}
+        </Text>
+      )
       const face = (
         <Box flexDirection="column" gap="xs">
           <Box flexDirection="row" gap="sm" alignItems="center">
-            {Svg ? <Svg source={avatarSvg(role.id, portraitKind(held), state)} alt={`${role.title}: ${robotName(r)}`} width={30} height={30} /> : null}
+            {Svg ? <Svg source={avatarSvg(role.id, portraitKind(held), state)} alt={`${role.title}: ${robotName(r)}`} width={40} height={40} /> : null}
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
               <Text bold wrap="truncate-end">
                 {robotName(r)}
@@ -1013,9 +1090,18 @@ export const register: Register = (on) => {
               </Text>
             </Box>
             <Box flexDirection="column" alignItems="flex-end" flexShrink={0}>
-              <Text color={isOverheated(r) ? 'warning' : STATE_COLOR[state]} size="caption" wrap="truncate-end">
-                ● {statusText(r, now)}
-              </Text>
+              <Box flexDirection="row" gap="xs" alignItems="center">
+                {terminal ? (
+                  status
+                ) : (
+                  <Box backgroundColor={CHIP[hot ? 'waiting' : state]} paddingX="xs">
+                    {status}
+                  </Box>
+                )}
+                <Text dimColor size="caption">
+                  {open ? '▾' : '▸'}
+                </Text>
+              </Box>
               {r.context ? (
                 <Text dimColor size="caption" wrap="truncate-end">
                   {fmtContext(r.context)} context{r.type === 'main' && w.limit ? ` · ${Math.min(100, Math.round((r.context / w.limit) * 100))}%` : ''}
@@ -1023,7 +1109,7 @@ export const register: Register = (on) => {
               ) : null}
             </Box>
           </Box>
-          {Svg ? <Svg source={progressSvg(progress.bar, role.id, 320)} alt={progress.label} /> : null}
+          {Svg ? <Svg source={progressSvg(progress.bar, role.id, 320)} alt={progress.label} width={BAR_PX} height={8} /> : null}
         </Box>
       )
       // without a working click layer the card has a plain button to open it by
@@ -1046,18 +1132,17 @@ export const register: Register = (on) => {
         </Box>
       )
       cards.push(
-        <Box
-          key={`task-${r.id}`}
-          flexDirection="column"
-          gap="xs"
-          paddingX="sm"
-          paddingY="xs"
-          backgroundColor={open ? CARD_OPEN : CARD}
-          hover={{ backgroundColor: CARD_OPEN }}
-        >
-          {clickable}
-          {open ? await details(r) : null}
-        </Box>,
+        framed(
+          `task-${r.id}`,
+          role.paint.m,
+          open,
+          true,
+          <Box flexDirection="column" gap="xs">
+            {clickable}
+            {open ? rule : null}
+            {open ? details(r) : null}
+          </Box>,
+        ),
       )
     }
     // What has been changed in this chat: the files, who changed each, and the latest change to the one picked.
@@ -1102,8 +1187,12 @@ export const register: Register = (on) => {
             </Box>
           </Box>
         )
-      changesCard = (
-        <Box key="changes-card" flexDirection="column" gap="xs" paddingX="sm" paddingY="xs" backgroundColor={opened ? CARD_OPEN : CARD}>
+      changesCard = framed(
+        'changes-card',
+        '#ffc35c',
+        !!opened,
+        false,
+        <Box flexDirection="column" gap="xs">
           <Text bold wrap="truncate-end">
             Changes
             <Text dimColor>
@@ -1113,6 +1202,7 @@ export const register: Register = (on) => {
             </Text>
           </Text>
           {pickable}
+          {opened ? rule : null}
           {opened ? (
             <Box flexDirection="column">
               <Text dimColor size="caption" wrap="truncate-end">
@@ -1121,7 +1211,7 @@ export const register: Register = (on) => {
               {opened.diff ? <Code source={opened.diff} format="diff" /> : <Text dimColor>No preview of this change.</Text>}
             </Box>
           ) : null}
-        </Box>
+        </Box>,
       )
     }
     const list = (

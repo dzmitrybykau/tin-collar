@@ -3265,26 +3265,38 @@ export type TaskState = 'running' | 'waiting' | 'done' | 'failed' | 'idle'
 
 const BADGE: Record<TaskState, string> = { running: '#4f8fe6', waiting: C.amber, done: '#3fbf6a', failed: C.red, idle: '#6f7893' }
 
-/** A robot's portrait: its pixel head, its headgear and its collar on a glass tile, with a status badge. */
+/** The lamp of each state, and the same with the light on it. */
+const BADGE_LIT: Record<TaskState, string> = { running: '#a9ccff', waiting: C.lamp, done: '#b5f0bb', failed: '#ff9a96', idle: C.steel }
+/** The dark behind a card's instruments: the app's own, near enough, so they sit in the card and not on it. */
+const CARD_INK = '#10141f'
+
+/**
+ * A robot's portrait for its card: its head and shoulders in a well of its own dark paint, framed
+ * in its own mid paint, with a square lamp in the corner that says how its task stands. Every
+ * edge is square and every colour flat, as in the office.
+ */
 export function avatarSvg(roleId: string, kind: ActivityKind, state: TaskState = 'running'): string {
   const role = roleInfo(roleId)
   const g = new Px(20, 20)
-  bot(g, 10, 23, { role: role.id, small: false, view: 'front', pose: 'stand', eyes: lookFor(kind, false).eyes })
-  // a flat square tile in the role's own dark, as square as the office's pixels
-  const tile = `<rect width="20" height="20" fill="${mix(role.paint.d, '#121826', 0.55)}"/>`
-  const c = BADGE[state]
-  // the badge is a square in the corner; at work it blinks
-  const blink = state === 'running' ? `<animate attributeName="opacity" values="1;0.35;1" dur="1.6s" repeatCount="indefinite"/>` : ''
-  const mark =
-    state === 'done'
-      ? `<path d="M15 17h1v1h-1zM16 18h1v1h-1zM17 17h1v1h-1zM18 16h1v1h-1z" fill="#ffffff"/>`
-      : state === 'failed'
-        ? `<path d="M15 16h1v1h-1zM18 16h1v1h-1zM16 17h2v1h-2zM15 18h1v1h-1zM18 18h1v1h-1z" fill="#ffffff"/>`
-        : state === 'waiting'
-          ? `<path d="M16 15h2v2h-2zM16 18h2v1h-2z" fill="#1a1428"/>`
-          : ''
-  const badge = state === 'idle' ? '' : `<rect x="13" y="13" width="7" height="7" fill="#121826"/><rect x="14" y="14" width="6" height="6" fill="${c}">${blink}</rect>${mark}`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="40" height="40" shape-rendering="crispEdges">${tile}${g.svg()}${badge}</svg>`
+  R(g, role.paint.m, 0, 0, 20, 20)
+  R(g, mix(role.paint.d, CARD_INK, 0.62), 1, 1, 18, 18)
+  const face = new Px(18, 18)
+  bot(face, 9, 22, { role: role.id, small: false, view: 'front', pose: 'stand', eyes: lookFor(kind, false).eyes })
+  let badge = ''
+  if (state !== 'idle') {
+    const b = new Px(20, 20)
+    R(b, CARD_INK, 12, 12, 8, 8)
+    R(b, BADGE[state], 13, 13, 6, 6)
+    R(b, BADGE_LIT[state], 13, 13, 6, 1)
+    const dot = (c: string, cells: Array<[number, number]>) => cells.forEach(([x, y]) => R(b, c, 13 + x, 13 + y, 1, 1))
+    if (state === 'done') dot(C.white, [[1, 3], [2, 4], [3, 3], [4, 2]])
+    else if (state === 'failed') dot(C.white, [[1, 1], [4, 1], [2, 2], [3, 2], [2, 3], [3, 3], [1, 4], [4, 4]])
+    else if (state === 'waiting') dot(C.ink, [[2, 1], [3, 1], [2, 2], [3, 2], [2, 4], [3, 4]])
+    // at work the lamp goes down and comes up again
+    const dim = state === 'running' ? `<rect x="13" y="13" width="6" height="6" fill="${CARD_INK}" opacity="0"><animate attributeName="opacity" values="0;0.6;0" dur="1.6s" repeatCount="indefinite"/></rect>` : ''
+    badge = b.svg() + dim
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="40" height="40" shape-rendering="crispEdges">${g.svg()}<g transform="translate(1 1)">${face.svg()}</g>${badge}</svg>`
 }
 
 /** How many days the tokens plate charts: the last week, today included. */
@@ -3340,28 +3352,34 @@ const KIND_COL: Partial<Record<ActivityKind, [string, string]>> = {
   error: [C.red, '#ff9a96'],
 }
 
-/** A flat progress track of square segments; the step in flight blinks. */
+/**
+ * A card's progress, made as the office's gauge is: a dark glass in a steel case, and in it a
+ * cell for each step, lit in its colour with a line of light along its top. The step in flight
+ * blinks. The picture stretches to the width it is given, so the case always spans its card.
+ */
 export function progressSvg(p: Progress, roleId: string, width = 220): string {
   const w = width
-  const h = 6
+  const h = 8
   const paint = roleInfo(roleId).paint
   let segs = ''
   let live = ''
-  const pill = (x: number, sw: number, fill: string) => `<rect x="${x.toFixed(2)}" y="0" width="${Math.max(1, sw).toFixed(2)}" height="${h}" fill="${fill}"/>`
+  const rect = (x: number, y: number, sw: number, sh: number, fill: string) => `<rect x="${x.toFixed(2)}" y="${y}" width="${Math.max(1, sw).toFixed(2)}" height="${sh}" fill="${fill}"/>`
+  const pill = (x: number, sw: number, fill: string, top = '') => rect(x, 2, sw, 4, fill) + (top ? rect(x, 2, sw, 1, top) : '')
   const shimmer = (x: number, sw: number) =>
-    `<rect x="${x.toFixed(2)}" y="0" width="${Math.max(1, sw).toFixed(2)}" height="${h}" fill="#ffffff"><animate attributeName="opacity" values="0;0.45;0" dur="1.4s" repeatCount="indefinite"/></rect>`
-  const inner = w
+    `<rect x="${x.toFixed(2)}" y="2" width="${Math.max(1, sw).toFixed(2)}" height="4" fill="${C.scr}" opacity="0"><animate attributeName="opacity" values="0;0.65;0" dur="1.4s" repeatCount="indefinite"/></rect>`
+  const DARK = '#1c2a3d'
+  const inner = w - 4
   if (p.mode === 'plan') {
     const n = Math.max(1, p.statuses.length)
     const gap = n > 24 ? 1 : 2
     const sw = (inner - gap * (n - 1)) / n
     p.statuses.forEach((st, i) => {
-      const x = i * (sw + gap)
-      if (st === 'completed') segs += pill(x, sw, paint.m)
+      const x = 2 + i * (sw + gap)
+      if (st === 'completed') segs += pill(x, sw, paint.m, paint.l)
       else if (st === 'in_progress') {
-        segs += pill(x, sw, C.amber)
+        segs += pill(x, sw, C.amber, C.lamp)
         live = shimmer(x, sw)
-      } else segs += pill(x, sw, '#ffffff" fill-opacity="0.12')
+      } else segs += pill(x, sw, DARK)
     })
   } else {
     const slots = Math.max(8, Math.floor((inner + 2) / 14))
@@ -3369,14 +3387,16 @@ export function progressSvg(p: Progress, roleId: string, width = 220): string {
     const sw = (inner - gap * (slots - 1)) / slots
     const kinds = p.kinds.slice(-(p.state === 'running' ? slots : slots - 1))
     for (let i = 0; i < slots; i++) {
-      const x = i * (sw + gap)
+      const x = 2 + i * (sw + gap)
       const k = kinds[i]
-      if (k) segs += pill(x, sw, (KIND_COL[k] ?? [C.steelD, C.steel])[0])
-      else if (p.state === 'done' && i > kinds.length) segs += pill(x, sw, paint.m)
-      else if (p.state !== 'running' && i === kinds.length) segs += pill(x, sw, p.state === 'done' ? '#3fbf6a' : C.red)
-      else segs += pill(x, sw, '#ffffff" fill-opacity="0.12')
+      const col = k ? (KIND_COL[k] ?? [C.steelD, C.steel]) : null
+      if (col) segs += pill(x, sw, col[0], col[1])
+      else if (p.state === 'done' && i > kinds.length) segs += pill(x, sw, paint.m, paint.l)
+      else if (p.state !== 'running' && i === kinds.length) segs += p.state === 'done' ? pill(x, sw, '#3fbf6a', '#b5f0bb') : pill(x, sw, C.red, '#ff9a96')
+      else segs += pill(x, sw, DARK)
     }
-    if (p.state === 'running' && kinds.length) live = shimmer((kinds.length - 1) * (sw + gap), sw)
+    if (p.state === 'running' && kinds.length) live = shimmer(2 + (kinds.length - 1) * (sw + gap), sw)
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" shape-rendering="crispEdges">${segs}${live}</svg>`
+  const glass = `<rect width="${w}" height="${h}" fill="${C.panel2}"/><rect x="1" y="1" width="${w - 2}" height="${h - 2}" fill="${C.scr}"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none" shape-rendering="crispEdges">${glass}${segs}${live}</svg>`
 }

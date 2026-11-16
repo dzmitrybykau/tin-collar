@@ -62,7 +62,7 @@ Both plates are made the way the sign is: the same wood and lettering across the
 
 ## Under the picture
 
-Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one. The cards are flat panels with square corners, like the app's own, and their portraits and bars are as square as the office's pixels.
+Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one. Each card has a square frame a pixel thick with its robot's colour down the near edge, a chip that says how the task stands, and a mark that shows whether it is open; its portrait and its progress bar are made the way the office's own instruments are. A click on a card opens its details: the plan, the latest steps, the latest change and what the agent last said.
 
 Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
 

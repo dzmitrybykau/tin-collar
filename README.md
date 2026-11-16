@@ -20,7 +20,7 @@ Tin Collar is a mod for Claude Code. It opens an **Office** pane beside the conv
 
 - **The main agent** runs the office from a leather chair at the ground-floor desk. The bubble over its head shows what it is doing right now: the file it reads, the command it runs, the helper it is sending for. With nothing to type, it taps its stick on the desk.
 - **Subagents are 3D-printed.** When Claude starts a subagent, the printer in the corner builds a robot, the main agent hands it a blueprint, and the robot walks to a free desk or takes the lift to an upper floor. Robots ordered together are printed one after another, and the printer shows how many are waiting.
-- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch in the floor. Under the floor it is dark, and nothing down there can be seen until the hatch swings open: then a shaft of light drops in and shows a ladle of molten metal, the stone wall behind it and the first of a pipe. The splash lights the cellar wide for an instant and shakes a drop or two out of the pipe's joint; when the last drop has fallen the hatch shuts, and the glow of the metal is the last thing to go.
+- **Finished robots are recycled.** A robot that is done carries its report to the main desk, then jumps through the hatch in the floor, under an amber arrow lettered OFFBOARDING. Under the floor it is dark, and nothing down there can be seen until the hatch swings open: then a shaft of light drops in and shows a ladle of molten metal, the stone wall behind it and the first of a pipe. The splash lights the cellar wide for an instant and shakes a drop or two out of the pipe's joint; when the last drop has fallen the hatch shuts, and the glow of the metal is the last thing to go.
 - **The metal comes back.** When the next robot is ordered, a slug of metal leaves the ladle and travels the pipe in the dark, lighting it as it goes, up into the printer, whose vents glow while the robot is built.
 - **More robots, more floors.** Two desks on the ground floor, five on each floor above it, up to four upper floors: 22 robots at once.
 - **A stuck robot overheats.** When three of an agent's tool calls fail in a row, its robot turns red, lets off steam at the ears and its screen fills with red; its card says how many have failed. The first call that works cools it down.
@@ -62,7 +62,7 @@ Both plates are made the way the sign is: the same wood and lettering across the
 
 ## Under the picture
 
-Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one.
+Below the office is a task list with one card per agent: its portrait, what it is doing, a progress bar and how much context it carries. The bar follows the agent's own plan when it keeps one. The cards are flat panels with square corners, like the app's own, and their portraits and bars are as square as the office's pixels.
 
 Click a card to open the agent's trace: its plan, its recent steps, its latest change and its last message. In the desktop app you can also click the robot itself. Agent rows in the chat get the robot's portrait too, and opening an agent from Claude Code's own task list opens its card here.
 

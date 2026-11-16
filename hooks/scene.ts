@@ -1093,7 +1093,7 @@ const SHAFT_X = 245
 export const ROOF_H = 14
 const GROUND_DESKS = [
   { robot: 58, bubble: { x: 22, y: 48 } },
-  { robot: 196, bubble: { x: 180, y: 54 } },
+  { robot: 196, bubble: { x: 187, y: 54 } },
 ]
 const UPPER_X = [20, 64, 108, 152, 196]
 // The wall: the chat's sign up top, and under it a row of two plates of one make: the Employee
@@ -1442,6 +1442,46 @@ function sign(g: Px, name: string, face: string, ink: string, lit?: string) {
   tx(g, name, x + 4, SIGN_Y + 3, ink)
 }
 
+/* ---------- the way out ---------- */
+/** Lettering turned on its side, to be read downward: each letter's head is to the right. What comes back is the row after the last. */
+function txDown(g: Px, s: string, x: number, y: number, c: string) {
+  for (const ch of s.toUpperCase()) {
+    const r = glyph(ch)
+    for (let j = 0; j < 5; j++) {
+      const row = r[j]!
+      for (let i = 0; i < row.length; i++) if (row[i] === '1') R(g, c, x + 4 - j, y + i, 1, 1)
+    }
+    y += r[0]!.length + 1
+  }
+  return y - 1
+}
+
+/**
+ * Over the recycling hatch hangs the sign of what it is for: an amber arrow pointing straight
+ * down at it, lettered OFFBOARDING down its length. The head is as wide as the hatch.
+ */
+function wayOut(g: Px) {
+  const name = 'OFFBOARDING'
+  const cx = HOLE_X
+  const head = HOLE_W >> 1
+  const tip = FY - 4
+  const neck = tip - head // the row where the head is widest
+  const top = neck - 3 - tw(name) - 2
+  const shape = (c: string, fill: string, dx: number, dy: number) => {
+    R(g, c, cx - 4 + dx, top + dy, 9, neck - top)
+    R(g, fill, cx - 3 + dx, top + 1 + dy, 7, neck - top - 1)
+    R(g, c, cx - head + dx, neck - 1 + dy, head * 2 + 1, 1)
+    R(g, fill, cx - 3 + dx, neck - 1 + dy, 7, 1)
+    for (let k = 0; k <= head; k++) {
+      R(g, c, cx - head + k + dx, neck + k + dy, (head - k) * 2 + 1, 1)
+      if (k < head) R(g, fill, cx - head + k + 1 + dx, neck + k + dy, (head - k) * 2 - 1, 1)
+    }
+  }
+  shape(WALL_SHADOW, WALL_SHADOW, 1, 1)
+  shape(C.ink, C.amber, 0, 0)
+  txDown(g, name, cx - 2, top + 2, C.ink)
+}
+
 /* ---------- the plates on the wall ---------- */
 /*
  * What the office shows of itself is all made one way. A plate is a board of the sign's own wood
@@ -1566,11 +1606,7 @@ function paintGround(home: string): Px {
   }
   keyboard(g, 117, FY - 11, 13)
   bossChair(g, MAIN_X, FY)
-  // a warning sign over the recycling hatch
-  R(g, C.ink, 175, 86, 9, 8)
-  R(g, C.amber, 176, 87, 7, 6)
-  R(g, C.ink, 179, 88, 1, 3)
-  R(g, C.ink, 179, 92, 1, 1)
+  wayOut(g)
   for (const d of GROUND_DESKS) workstation(g, d.robot, FY)
   // floor
   R(g, C.ink, 0, FY, W, 1)
@@ -3234,26 +3270,21 @@ export function avatarSvg(roleId: string, kind: ActivityKind, state: TaskState =
   const role = roleInfo(roleId)
   const g = new Px(20, 20)
   bot(g, 10, 23, { role: role.id, small: false, view: 'front', pose: 'stand', eyes: lookFor(kind, false).eyes })
-  const id = `av${roleId}${state}`.replace(/[^a-zA-Z0-9]/g, '')
-  const defs =
-    `<defs><linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${role.paint.d}" stop-opacity="0.75"/><stop offset="1" stop-color="#121826"/></linearGradient>` +
-    `<linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>` +
-    `<clipPath id="${id}c"><rect x="0.5" y="0.5" width="19" height="19" rx="5"/></clipPath></defs>`
-  const tile = `<rect x="0.5" y="0.5" width="19" height="19" rx="5" fill="url(#${id}b)"/>`
-  const robot = `<g clip-path="url(#${id}c)"><g shape-rendering="crispEdges">${g.svg()}</g><rect x="0.5" y="0.5" width="19" height="9" fill="url(#${id}g)"/></g>`
-  const rim = `<rect x="0.5" y="0.5" width="19" height="19" rx="5" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="0.6"/>`
+  // a flat square tile in the role's own dark, as square as the office's pixels
+  const tile = `<rect width="20" height="20" fill="${mix(role.paint.d, '#121826', 0.55)}"/>`
   const c = BADGE[state]
-  const pulse = state === 'running' ? `<circle cx="16.6" cy="16.6" r="3.4" fill="${c}" opacity="0"><animate attributeName="opacity" values="0.55;0;0.55" dur="1.6s" repeatCount="indefinite"/><animate attributeName="r" values="2.6;4.2;2.6" dur="1.6s" repeatCount="indefinite"/></circle>` : ''
+  // the badge is a square in the corner; at work it blinks
+  const blink = state === 'running' ? `<animate attributeName="opacity" values="1;0.35;1" dur="1.6s" repeatCount="indefinite"/>` : ''
   const mark =
     state === 'done'
-      ? `<path d="M15.2 16.7l1 1 2-2.1" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>`
+      ? `<path d="M15 17h1v1h-1zM16 18h1v1h-1zM17 17h1v1h-1zM18 16h1v1h-1z" fill="#ffffff"/>`
       : state === 'failed'
-        ? `<path d="M15.5 15.5l2.2 2.2M17.7 15.5l-2.2 2.2" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round"/>`
+        ? `<path d="M15 16h1v1h-1zM18 16h1v1h-1zM16 17h2v1h-2zM15 18h1v1h-1zM18 18h1v1h-1z" fill="#ffffff"/>`
         : state === 'waiting'
-          ? `<path d="M16.6 15.2v1.6M16.6 17.9v0.1" stroke="#1a1428" stroke-width="0.8" stroke-linecap="round"/>`
+          ? `<path d="M16 15h2v2h-2zM16 18h2v1h-2z" fill="#1a1428"/>`
           : ''
-  const badge = state === 'idle' ? '' : `${pulse}<circle cx="16.6" cy="16.6" r="2.6" fill="${c}" stroke="#121826" stroke-width="0.8"/>${mark}`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="40" height="40">${defs}${tile}${robot}${rim}${badge}</svg>`
+  const badge = state === 'idle' ? '' : `<rect x="13" y="13" width="7" height="7" fill="#121826"/><rect x="14" y="14" width="6" height="6" fill="${c}">${blink}</rect>${mark}`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="40" height="40" shape-rendering="crispEdges">${tile}${g.svg()}${badge}</svg>`
 }
 
 /** How many days the tokens plate charts: the last week, today included. */
@@ -3309,38 +3340,28 @@ const KIND_COL: Partial<Record<ActivityKind, [string, string]>> = {
   error: [C.red, '#ff9a96'],
 }
 
-/** A glass progress track with glossy segments; the step in flight shimmers. */
+/** A flat progress track of square segments; the step in flight blinks. */
 export function progressSvg(p: Progress, roleId: string, width = 220): string {
   const w = width
-  const h = 8
+  const h = 6
   const paint = roleInfo(roleId).paint
-  const id = `pg${roleId}`.replace(/[^a-zA-Z0-9]/g, '')
-  const defs =
-    `<defs><linearGradient id="${id}t" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/><stop offset="1" stop-color="#ffffff" stop-opacity="0.03"/></linearGradient>` +
-    `<linearGradient id="${id}f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${paint.l}"/><stop offset="0.55" stop-color="${paint.m}"/><stop offset="1" stop-color="${paint.d}"/></linearGradient>` +
-    `<linearGradient id="${id}a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C.lamp}"/><stop offset="0.55" stop-color="${C.amber}"/><stop offset="1" stop-color="#c98a2c"/></linearGradient>` +
-    `<linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>` +
-    `<linearGradient id="${id}s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.7"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient></defs>`
   let segs = ''
   let live = ''
-  const pill = (x: number, sw: number, fill: string) =>
-    `<rect x="${x.toFixed(2)}" y="2" width="${Math.max(1, sw).toFixed(2)}" height="${h - 4}" rx="${Math.min(3, sw / 2).toFixed(2)}" fill="${fill}"/>`
-  const shimmer = (x: number, sw: number) => {
-    const span = Math.max(4, sw)
-    return `<rect x="${x.toFixed(2)}" y="2" width="${span.toFixed(2)}" height="${h - 4}" rx="${Math.min(3, span / 2).toFixed(2)}" fill="url(#${id}s)"><animate attributeName="opacity" values="0.15;0.95;0.15" dur="1.4s" repeatCount="indefinite"/></rect>`
-  }
-  const inner = w - 4
+  const pill = (x: number, sw: number, fill: string) => `<rect x="${x.toFixed(2)}" y="0" width="${Math.max(1, sw).toFixed(2)}" height="${h}" fill="${fill}"/>`
+  const shimmer = (x: number, sw: number) =>
+    `<rect x="${x.toFixed(2)}" y="0" width="${Math.max(1, sw).toFixed(2)}" height="${h}" fill="#ffffff"><animate attributeName="opacity" values="0;0.45;0" dur="1.4s" repeatCount="indefinite"/></rect>`
+  const inner = w
   if (p.mode === 'plan') {
     const n = Math.max(1, p.statuses.length)
     const gap = n > 24 ? 1 : 2
     const sw = (inner - gap * (n - 1)) / n
     p.statuses.forEach((st, i) => {
-      const x = 2 + i * (sw + gap)
-      if (st === 'completed') segs += pill(x, sw, `url(#${id}f)`)
+      const x = i * (sw + gap)
+      if (st === 'completed') segs += pill(x, sw, paint.m)
       else if (st === 'in_progress') {
-        segs += pill(x, sw, `url(#${id}a)`)
+        segs += pill(x, sw, C.amber)
         live = shimmer(x, sw)
-      } else segs += pill(x, sw, '#ffffff" fill-opacity="0.07')
+      } else segs += pill(x, sw, '#ffffff" fill-opacity="0.12')
     })
   } else {
     const slots = Math.max(8, Math.floor((inner + 2) / 14))
@@ -3348,16 +3369,14 @@ export function progressSvg(p: Progress, roleId: string, width = 220): string {
     const sw = (inner - gap * (slots - 1)) / slots
     const kinds = p.kinds.slice(-(p.state === 'running' ? slots : slots - 1))
     for (let i = 0; i < slots; i++) {
-      const x = 2 + i * (sw + gap)
+      const x = i * (sw + gap)
       const k = kinds[i]
       if (k) segs += pill(x, sw, (KIND_COL[k] ?? [C.steelD, C.steel])[0])
-      else if (p.state === 'done' && i > kinds.length) segs += pill(x, sw, `url(#${id}f)`)
+      else if (p.state === 'done' && i > kinds.length) segs += pill(x, sw, paint.m)
       else if (p.state !== 'running' && i === kinds.length) segs += pill(x, sw, p.state === 'done' ? '#3fbf6a' : C.red)
-      else segs += pill(x, sw, '#ffffff" fill-opacity="0.07')
+      else segs += pill(x, sw, '#ffffff" fill-opacity="0.12')
     }
-    if (p.state === 'running' && kinds.length) live = shimmer(2 + (kinds.length - 1) * (sw + gap), sw)
+    if (p.state === 'running' && kinds.length) live = shimmer((kinds.length - 1) * (sw + gap), sw)
   }
-  const track = `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="${(h - 1) / 2}" fill="url(#${id}t)" stroke="#ffffff" stroke-opacity="0.14"/>`
-  const gloss = `<rect x="1" y="1" width="${w - 2}" height="${h / 2 - 1}" rx="${h / 2 - 1}" fill="url(#${id}g)"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${defs}${track}${segs}${live}${gloss}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" shape-rendering="crispEdges">${segs}${live}</svg>`
 }

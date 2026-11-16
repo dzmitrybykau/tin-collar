@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Robot } from '../types'
-import { ARRIVAL_KEPT_MS, BAR_MAX, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartBars, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, GAUGE_ROWS, gaugeInRed, gaugeLevel, girthOf, isOverheated, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
+import { ARRIVAL_KEPT_MS, avatarSvg, BAR_MAX, bot, buildJourney, buildRoom, buildScene, CAPACITY, chartBars, cloudSize, deskProp, directJourneys, exitSlot, failClick, fit, floorsFor, GAUGE_ROWS, gaugeInRed, gaugeLevel, girthOf, isOverheated, hasStoodUp, JOURNEY_LEAD_MS, KIT, layClick, layPicture, LEAK_MS, mendWait, noLayers, openCard, phaseOf, positionOf, printSlot, progressSvg, Px, roleOf, seatFor, SHED_MIN_MS, SHED_MAX_MS, PILE_MS, shedSpan, skyKey, stayOf, transitionsOf } from '../hooks/scene'
 import { addTokens, champion, dailyTotals, dayOfKey, formatTokens, lastDays, tokensKey } from '../hooks/tally'
 
 const PANE = {
@@ -791,5 +791,24 @@ test("while Claude compacts an agent's context its card says so, and afterwards 
   await $.session.compact({ trigger: 'precompute', messages: kept } as unknown as Parameters<typeof $.session.compact>[0])
   expect(await ui.find({ type: 'Text', text: /compacting/i })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^20k context$/i })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a card is a flat panel with square corners, and nothing in its portrait or its progress is rounded', async ($, on) => {
+  // the app rounds every border it draws for a mod, so a card has none
+  for (const role of ['main', 'coder', 'tester']) {
+    for (const state of ['running', 'waiting', 'done', 'failed', 'idle'] as const) expect(avatarSvg(role, 'write', state)).not.toMatch(/\brx=|<circle|Gradient/)
+  }
+  expect(progressSvg({ mode: 'plan', statuses: ['completed', 'in_progress', 'pending'] }, 'main')).not.toMatch(/\brx=|Gradient/)
+  expect(progressSvg({ mode: 'trail', kinds: ['read', 'write', 'run'], state: 'running' }, 'coder')).not.toMatch(/\brx=|Gradient/)
+  engine(on)
+  await $.session.start({ cwd: 'C:/work/acme-api', surface: 'desktop', isInteractive: true })
+  await spawnExplorer($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const key of ['task-main', 'task-a1']) {
+    const card = (await ui.find({ key })) as { props?: Record<string, unknown> } | undefined
+    expect(card?.props?.backgroundColor).toBeDefined()
+    expect(card?.props?.borderStyle).toBeUndefined()
+  }
   await ui.unmount()
 })

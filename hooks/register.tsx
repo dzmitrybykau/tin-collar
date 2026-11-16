@@ -24,6 +24,9 @@ const LIST_KEEP_MS = 120_000
 // how many changed files are remembered, and how many of them the pane lists
 const CHANGES_KEPT = 40
 const CHANGES_SHOWN = 8
+// a card's panel, and the same a shade lighter for the card that is open or under the pointer
+const CARD = '#ffffff0d'
+const CARD_OPEN = '#ffffff1a'
 
 // Change a shape tag when its type changes: it declines what an older version stored.
 const world = atom({ plugin: 'tin-collar', key: 'world' } as const, { home: '', floors: 0, robots: [], steps: {} }, { shape: 'world-4' })
@@ -985,7 +988,9 @@ export const register: Register = (on) => {
       )
     }
 
-    // Each task is a card: portrait, title and role, a status chip, then its progress.
+    // Each task is a card: portrait, title and role, a status chip, then its progress. A card is a
+    // flat panel with square corners, as the app's own are: the app rounds every border it draws
+    // for a mod, so a card has none, and the one that is open is a shade lighter.
     // A click anywhere on the card's face opens or closes its details.
     const cards = []
     for (const r of robots) {
@@ -1047,10 +1052,8 @@ export const register: Register = (on) => {
           gap="xs"
           paddingX="sm"
           paddingY="xs"
-          borderStyle="round"
-          borderColor={open ? 'promptBorder' : 'subtle'}
-          backgroundColor="#ffffff08"
-          hover={{ backgroundColor: '#ffffff12', borderColor: 'promptBorder' }}
+          backgroundColor={open ? CARD_OPEN : CARD}
+          hover={{ backgroundColor: CARD_OPEN }}
         >
           {clickable}
           {open ? await details(r) : null}
@@ -1100,7 +1103,7 @@ export const register: Register = (on) => {
           </Box>
         )
       changesCard = (
-        <Box key="changes-card" flexDirection="column" gap="xs" paddingX="sm" paddingY="xs" borderStyle="round" borderColor={opened ? 'promptBorder' : 'subtle'} backgroundColor="#ffffff08">
+        <Box key="changes-card" flexDirection="column" gap="xs" paddingX="sm" paddingY="xs" backgroundColor={opened ? CARD_OPEN : CARD}>
           <Text bold wrap="truncate-end">
             Changes
             <Text dimColor>

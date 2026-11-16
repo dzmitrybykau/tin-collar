@@ -259,7 +259,7 @@ test('the employee of the day is whoever used the most tokens today', async () =
   expect(addTokens(tally, { id: 'main', role: 'main', name: 'Main agent' }, 5, tomorrow).total).toBe(5)
 })
 
-test('the tokens plate charts tokens per day across every chat', () => {
+test('the KPI plate charts tokens per day across every chat', () => {
   const today = new Date(2026, 10, 11, 9).getTime()
   const days = lastDays(today, 3)
   expect(days).toEqual(['2026-11-9', '2026-11-10', '2026-11-11'])

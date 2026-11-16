@@ -3266,10 +3266,14 @@ export function chartBars(daily: number[]): number[] {
   return daily.map((v) => (v > 0 ? Math.max(1, Math.round((v / max) * BAR_MAX)) : 0))
 }
 
-/** Tokens per day over the last week: a bar for each day, oldest first, and today's, still growing, in amber. */
+/**
+ * The KPI plate: tokens per day over the last week, a bar for each day, oldest first, and today's,
+ * still growing, in amber. Its name is the office's joke: here the indicator that counts is how
+ * many tokens were got through.
+ */
 function tokensPlate(daily: number[]): string {
   const g = new Px(BOARD.w + 1, BOARD.h + 1)
-  const f = plate(g, 0, 0, BOARD.w, BOARD.h, 'TOKENS/DAY')
+  const f = plate(g, 0, 0, BOARD.w, BOARD.h, 'KPI')
   const base = f.y + f.h - 2
   const pitch = 6
   const x0 = f.x + ((f.w - (daily.length * pitch - 2)) >> 1)

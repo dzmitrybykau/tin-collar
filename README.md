@@ -56,7 +56,7 @@ Each robot is painted and dressed for its role, keeps a thing of its own on its 
 
 - **The sign** carries the name of the folder the session works in.
 - **Employee of the Day** is a plate with the portrait of the robot that has used the most tokens today, what it is, and how many it has used.
-- **Tokens/day** is the plate beside it: a bar for each of the last seven days, across all your chats, with today's in amber.
+- **KPI** is the plate beside it. The office has one key performance indicator, tokens got through: a bar for each of the last seven days, across all your chats, with today's in amber.
 
 Both plates are made the way the sign is: the same wood and lettering across the head, over a dark face. Everything in the office that shows a number follows one code: cream is what you read first, teal is a quantity, amber is today's or a warning, red is what needs minding.
 
